@@ -1,0 +1,20 @@
+<mujoco>
+  <option gravity="0 0 -9.81" integrator="RK4"/>
+  <default>
+    <joint damping="0" frictionloss="0" armature="0"/>
+    <geom contype="0" conaffinity="0"/>
+  </default>
+  <worldbody>
+    <body name="link1">
+      <joint name="j_rx" type="hinge" axis="1 0 0" limited="false"/>
+      <joint name="j_ry" type="hinge" axis="0 1 0" limited="false"/>
+      <joint name="j_rz" type="hinge" axis="0 0 1" limited="false"/>
+      <geom type="capsule" size="0.05" density="4000" fromto="0 0 0 0.5 0 0" rgba="1 0 0 1"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor joint="j_rx" gear="1"/>
+    <motor joint="j_ry" gear="1"/>
+    <motor joint="j_rz" gear="1"/>
+  </actuator>
+</mujoco>
