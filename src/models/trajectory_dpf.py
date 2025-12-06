@@ -769,7 +769,7 @@ class TrajectoryDPF(pl.LightningModule):
         **sample_kwargs
     ):
         """
-        Generate and save trajectories to h5 file.
+        Generate and save trajectories to h5 file (consistent with training format).
         
         Args:
             output_path: path to output h5 file
@@ -789,7 +789,7 @@ class TrajectoryDPF(pl.LightningModule):
         qvel = trajectories[:, :, self.torque_dim + self.qacc_dim:self.torque_dim + self.qacc_dim + self.qvel_dim]
         qpos = trajectories[:, :, self.torque_dim + self.qacc_dim + self.qvel_dim:]
         
-        # Create output directory if it doesn't exist
+        # Create output directory if needed
         output_dir = os.path.dirname(output_path)
         if output_dir and not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
@@ -797,17 +797,17 @@ class TrajectoryDPF(pl.LightningModule):
         
         print(f"Saving to {output_path}...")
         with h5py.File(output_path, 'w') as f:
-            episode = f.create_group("episode")
-            episode.create_dataset("qpos", data=qpos, dtype='f8')
-            episode.create_dataset("qvel", data=qvel, dtype='f8')
-            episode.create_dataset("qacc", data=qacc, dtype='f8')
-            episode.create_dataset("torque", data=torque, dtype='f8')
+            # Match training format: root attrs
+            f.attrs['num_trajectories'] = num_samples
+            f.attrs['num_steps'] = trajectory_length
             
-            # Store metadata
-            episode.attrs['description'] = 'Generated trajectories from Trajectory DPF'
-            episode.attrs['num_trajectories'] = num_samples
-            episode.attrs['trajectory_length'] = trajectory_length
-            episode.attrs['diffusion_steps'] = self.diffusion_steps
+            # Match training format: traj_{i}/seq_* structure
+            for i in range(num_samples):
+                traj_group = f.create_group(f'traj_{i}')
+                traj_group.create_dataset('seq_qpos', data=qpos[i], dtype='f8')
+                traj_group.create_dataset('seq_qvel', data=qvel[i], dtype='f8')
+                traj_group.create_dataset('seq_qacc', data=qacc[i], dtype='f8')
+                traj_group.create_dataset('seq_torque', data=torque[i], dtype='f8')
         
         print(f"Saved {num_samples} trajectories to {output_path}")
 
@@ -846,6 +846,12 @@ def main():
                         help="Output path for generated samples")
     parser.add_argument("--sampler", type=str, choices=["ddpm", "ddim", "ddpm_legacy"], default=config.DEFAULT_SAMPLER,
                         help="Sampling method: 'ddpm' (full schedule, stochastic), 'ddim' (fast, deterministic), or 'ddpm_legacy' (subsampled stochastic)")
+    parser.add_argument("--num_diffusion_steps", type=int, default=config.DEFAULT_NUM_DIFFUSION_STEPS,
+                        help="Number of diffusion steps for sampling (can be less than training steps for DDIM)")
+    parser.add_argument("--context_fraction", type=float, default=config.DEFAULT_CONTEXT_FRACTION,
+                        help="Fraction of timesteps to use as context during sampling")
+    parser.add_argument("--use_ema", type=bool, default=config.DEFAULT_USE_EMA,
+                        help="Whether to use EMA weights for sampling")
     
     # W&B arguments
     parser.add_argument("--wandb", type=bool, default=config.DEFAULT_WANDB_ENABLED, help="Enable Weights & Biases logging")
@@ -855,7 +861,65 @@ def main():
     
     args = parser.parse_args()
     
-    # Load dataset
+    # Execute based on mode
+    if args.mode == "generate_samples":
+        # For generation mode, load everything from checkpoint - no dataset needed
+        if args.resume_from_checkpoint is None:
+            print("Error: --resume_from_checkpoint is required for generate_samples mode")
+            return
+        
+        print(f"Loading model from checkpoint: {args.resume_from_checkpoint}")
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        
+        # Load model directly from checkpoint (includes hyperparameters and buffers)
+        model = TrajectoryDPF.load_from_checkpoint(
+            args.resume_from_checkpoint,
+            map_location=device,
+        )
+        model = model.to(device)
+        print(f"[Sampling] Model loaded and moved to device: {device}")
+        print(f"[Sampling] Model dimensions: qpos={model.qpos_dim}, qvel={model.qvel_dim}, "
+              f"qacc={model.qacc_dim}, torque={model.torque_dim}")
+        print(f"[Sampling] Trajectory length: {model.max_timesteps}")
+        
+        # Load EMA shadow if present in checkpoint
+        checkpoint = torch.load(args.resume_from_checkpoint, map_location=device)
+        ema_shadow = checkpoint.get('ema_shadow', None)
+        ema_decay = checkpoint.get('ema_decay', 0.9995)
+        if ema_shadow is not None:
+            model.ema = EMA(model.model, decay=ema_decay)
+            print(f"[Sampling] Loading EMA shadow with {len(ema_shadow)} parameters...")
+            
+            loaded_count = 0
+            for name, tensor in ema_shadow.items():
+                if name in model.ema.shadow:
+                    model.ema.shadow[name] = tensor.to(device=device, dtype=model.ema.shadow[name].dtype)
+                    loaded_count += 1
+            
+            print(f"[Sampling] Loaded {loaded_count}/{len(ema_shadow)} EMA parameters")
+            model._ema_loaded = True
+            print("[Sampling] ✓ EMA shadow restored from checkpoint.")
+        else:
+            print("[Sampling] WARNING: No EMA shadow found in checkpoint!")
+            print("[Sampling] Proceeding with regular model weights.")
+        
+        # Generate samples
+        print(f"\nGenerating {args.num_samples} sample trajectories...")
+        print(f"[Sampling] Using sampler={args.sampler}, num_diffusion_steps={args.num_diffusion_steps}, "
+              f"context_fraction={args.context_fraction}, use_ema={args.use_ema}")
+        model.save_trajectories_to_h5(
+            output_path=args.output_path,
+            num_samples=args.num_samples,
+            trajectory_length=model.max_timesteps,
+            num_diffusion_steps=args.num_diffusion_steps,
+            context_fraction=args.context_fraction,
+            use_ema=args.use_ema,
+            sampler=args.sampler,
+        )
+        print(f"Sample generation complete! Saved to {args.output_path}")
+        return
+    
+    # Training mode - load dataset and setup training
     print(f"Loading dataset from {args.h5_path}...")
     dataset = TrajectoryDPFCached(args.h5_path)
     
@@ -958,173 +1022,86 @@ def main():
         torque_max=torque_max,
     )
     
-    # Execute based on mode
-    if args.mode == "train":
-        # Setup W&B logger (only for training)
-        logger = None
-        if args.wandb:
-            if not WANDB_AVAILABLE:
-                print("Warning: wandb is not installed. Run 'pip install wandb' to enable W&B logging.")
-                print("Continuing without W&B logging.")
-            else:
-                from pytorch_lightning.loggers import WandbLogger
-                logger = WandbLogger(
-                    project=args.wandb_project,
-                    name=args.wandb_run_name,
-                    entity=args.wandb_entity,
-                    save_dir=args.checkpoint_dir,
-                    log_model=True,  # Log model checkpoints to W&B
-                )
-                
-                # Log dataset and training info as hyperparameters
-                logger.log_hyperparams({
-                    'dataset_path': args.h5_path,
-                    'num_trajectories': len(dataset),
-                    'trajectory_length': max_timesteps,
-                    'qpos_dim': qpos_dim,
-                    'qvel_dim': qvel_dim,
-                    'qacc_dim': qacc_dim,
-                    'torque_dim': torque_dim,
-                    'batch_size': args.batch_size,
-                    'num_workers': args.num_workers,
-                    'lr': args.lr,
-                    'num_latents': args.num_latents,
-                    'num_latent_channels': args.num_latent_channels,
-                    'diffusion_steps': args.diffusion_steps,
-                    'epochs': args.epochs,
-                })
-                print(f"Initialized W&B logging: project={args.wandb_project}")
-        
-        # Setup callbacks
-        callbacks = []
-        
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=args.checkpoint_dir,
-            filename='trajectory_dpf_foward:{epoch:03d}_val_loss:{val_loss:.4f}',
-            every_n_epochs=10,  # Save checkpoint every 10 epochs
-        )
-        callbacks.append(checkpoint_callback)
-        
-        # Add W&B trajectory logging callback if W&B is enabled
-        if args.wandb and WANDB_AVAILABLE:
-            wandb_traj_callback = WandBTrajectoryCallback(
-                log_every_n_epochs=10,  # Log trajectory every 10 epochs
-                num_samples=1,
-            )
-            callbacks.append(wandb_traj_callback)
-        
-        # Setup trainer
-        trainer = pl.Trainer(
-            max_epochs=args.epochs,
-            accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-            devices=1,
-            callbacks=callbacks,
-            logger=logger,
-            # gradient_clip_val=1.0,
-            log_every_n_steps=10,
-        )
-        
-        # Train
-        print("Starting training...")
-        ckpt_path = None
-        if args.resume_from_checkpoint:
-            print(f"Resuming from checkpoint: {args.resume_from_checkpoint}")
-            # Option 1: Let Lightning restore full training state (epoch, optimizer, schedulers)
-            ckpt_path = args.resume_from_checkpoint
-            
-            # Additionally ensure model weights can load even if there are benign mismatches
-            try:
-                checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")
-                model.load_state_dict(checkpoint.get('state_dict', {}), strict=False)
-            except Exception as e:
-                print(f"[Training] Non-strict model weight preload skipped due to: {e}")
-        trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)
-        print("Training complete!")
-        
-    elif args.mode == "generate_samples":
-        # Load checkpoint for generation
-        if args.resume_from_checkpoint is None:
-            print("Error: --resume_from_checkpoint is required for generate_samples mode")
-            return
-        
-        print(f"Loading model from checkpoint: {args.resume_from_checkpoint}")
-        
-        # Move model to GPU FIRST before loading checkpoint
-        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        model = model.to(device)
-        print(f"[Sampling] Model moved to device: {device}")
-        
-        # Load the checkpoint
-        checkpoint = torch.load(args.resume_from_checkpoint, map_location=device)
-        model.load_state_dict(checkpoint['state_dict'], strict=False)
-        print("[Sampling] Model state dict loaded from checkpoint.")
-
-        # If EMA shadow exists in checkpoint, restore it for sampling
-        ema_shadow = checkpoint.get('ema_shadow', None)
-        ema_decay = checkpoint.get('ema_decay', 0.9995)
-        if ema_shadow is not None:
-            # Recreate EMA with correct device
-            model.ema = EMA(model.model, decay=ema_decay)
-            print(f"[Sampling] Loading EMA shadow with {len(ema_shadow)} parameters...")
-            
-            # Load EMA shadow tensors to correct device
-            loaded_count = 0
-            missing_in_shadow = []
-            missing_in_ema = []
-            
-            for name, tensor in ema_shadow.items():
-                if name in model.ema.shadow:
-                    model.ema.shadow[name] = tensor.to(device=device, dtype=model.ema.shadow[name].dtype)
-                    loaded_count += 1
-                else:
-                    missing_in_ema.append(name)
-            
-            # Check if there are EMA params not in checkpoint
-            for name in model.ema.shadow.keys():
-                if name not in ema_shadow:
-                    missing_in_shadow.append(name)
-            
-            print(f"[Sampling] Loaded {loaded_count}/{len(ema_shadow)} EMA parameters")
-            if missing_in_ema:
-                print(f"[Sampling] WARNING: {len(missing_in_ema)} params in checkpoint not found in model:")
-                for name in missing_in_ema[:5]:
-                    print(f"  - {name}")
-            if missing_in_shadow:
-                print(f"[Sampling] WARNING: {len(missing_in_shadow)} params in model not found in checkpoint:")
-                for name in missing_in_shadow[:5]:
-                    print(f"  - {name}")
-            
-            model._ema_loaded = True
-            print("[Sampling] ✓ EMA shadow restored from checkpoint.")
-            print("[Sampling] Note: EMA weights will be applied during sampling (use_ema=True).")
-            
-            # Verify EMA weights are different from model weights
-            sample_param_name = list(model.ema.shadow.keys())[0]
-            sample_model_param = dict(model.model.named_parameters())[sample_param_name]
-            sample_ema_param = model.ema.shadow[sample_param_name]
-            diff = (sample_model_param - sample_ema_param).abs().max().item()
-            print(f"[Sampling] Verification: Model vs EMA difference for '{sample_param_name}': {diff:.8f}")
-            if diff < 1e-8:
-                print(f"[Sampling] ⚠️  WARNING: Model and EMA weights are nearly identical!")
-                print(f"[Sampling] This suggests EMA wasn't properly trained or loaded.")
+    # Training mode - setup W&B logger
+    logger = None
+    if args.wandb:
+        if not WANDB_AVAILABLE:
+            print("Warning: wandb is not installed. Run 'pip install wandb' to enable W&B logging.")
+            print("Continuing without W&B logging.")
         else:
-            print("[Sampling] WARNING: No EMA shadow found in checkpoint!")
-            print("[Sampling] Proceeding with regular model weights (quality may be degraded).")
-        
-        # Generate samples
-        print(f"\nGenerating {args.num_samples} sample trajectories...")
-        print(f"[Sampling] Using sampler={args.sampler}, num_diffusion_steps=50, context_fraction=0.5")
-        print(f"[Sampling] These settings match the W&B training logs for fair comparison")
-        model.save_trajectories_to_h5(
-            output_path=args.output_path,
-            num_samples=args.num_samples,
-            trajectory_length=max_timesteps,
-            num_diffusion_steps=50,
-            context_fraction=0.5,  # Match W&B logger settings
-            use_ema=True,
-            sampler=args.sampler,
+            from pytorch_lightning.loggers import WandbLogger
+            logger = WandbLogger(
+                project=args.wandb_project,
+                name=args.wandb_run_name,
+                entity=args.wandb_entity,
+                save_dir=args.checkpoint_dir,
+                log_model=True,  # Log model checkpoints to W&B
+            )
+            
+            # Log dataset and training info as hyperparameters
+            logger.log_hyperparams({
+                'dataset_path': args.h5_path,
+                'num_trajectories': len(dataset),
+                'trajectory_length': max_timesteps,
+                'qpos_dim': qpos_dim,
+                'qvel_dim': qvel_dim,
+                'qacc_dim': qacc_dim,
+                'torque_dim': torque_dim,
+                'batch_size': args.batch_size,
+                'num_workers': args.num_workers,
+                'lr': args.lr,
+                'num_latents': args.num_latents,
+                'num_latent_channels': args.num_latent_channels,
+                'diffusion_steps': args.diffusion_steps,
+                'epochs': args.epochs,
+            })
+            print(f"Initialized W&B logging: project={args.wandb_project}")
+    
+    # Setup callbacks
+    callbacks = []
+    
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=args.checkpoint_dir,
+        filename='trajectory_dpf_foward:{epoch:03d}_val_loss:{val_loss:.4f}',
+        every_n_epochs=10,  # Save checkpoint every 10 epochs
+    )
+    callbacks.append(checkpoint_callback)
+    
+    # Add W&B trajectory logging callback if W&B is enabled
+    if args.wandb and WANDB_AVAILABLE:
+        wandb_traj_callback = WandBTrajectoryCallback(
+            log_every_n_epochs=10,  # Log trajectory every 10 epochs
+            num_samples=1,
         )
-        print(f"Sample generation complete! Saved to {args.output_path}")
+        callbacks.append(wandb_traj_callback)
+    
+    # Setup trainer
+    trainer = pl.Trainer(
+        max_epochs=args.epochs,
+        accelerator='gpu' if torch.cuda.is_available() else 'cpu',
+        devices=1,
+        callbacks=callbacks,
+        logger=logger,
+        # gradient_clip_val=1.0,
+        log_every_n_steps=10,
+    )
+    
+    # Train
+    print("Starting training...")
+    ckpt_path = None
+    if args.resume_from_checkpoint:
+        print(f"Resuming from checkpoint: {args.resume_from_checkpoint}")
+        # Option 1: Let Lightning restore full training state (epoch, optimizer, schedulers)
+        ckpt_path = args.resume_from_checkpoint
+        
+        # Additionally ensure model weights can load even if there are benign mismatches
+        try:
+            checkpoint = torch.load(args.resume_from_checkpoint, map_location="cpu")
+            model.load_state_dict(checkpoint.get('state_dict', {}), strict=False)
+        except Exception as e:
+            print(f"[Training] Non-strict model weight preload skipped due to: {e}")
+    trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)
+    print("Training complete!")
 
 
 if __name__ == "__main__":

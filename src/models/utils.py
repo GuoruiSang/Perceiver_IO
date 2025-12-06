@@ -485,7 +485,7 @@ def langevin_dynamics(
     return qpos_opt, qvel_opt, torque_opt
 
 
-def visualize_trajectory(trajectory: dict, save_path: str):
+def visualize_trajectory(trajectory: dict, save_path: str, name: str = 'trajectory'):
 
     keys = list(trajectory.keys())
     values = list(trajectory.values())
@@ -520,7 +520,7 @@ def visualize_trajectory(trajectory: dict, save_path: str):
             else:
                 axes[i, j].set_visible(False)  # Hide unused subplots
 
-    fig.savefig(os.path.join(save_path, 'trajectory.jpg'))
+    fig.savefig(os.path.join(save_path, f'{name}.jpg'))
     plt.close(fig)
 
 
@@ -530,3 +530,243 @@ def visualize_trajectory(trajectory: dict, save_path: str):
 # }
 
 # visualize_trajectory(trajectory, '/home/gsang/Projects/Perceiver_IO/plots')
+
+def compute_qpos_qvel_qacc_consistency_energy(qpos: torch.Tensor, qvel: torch.Tensor, qacc: torch.Tensor, dt: float) -> torch.Tensor:
+    """
+        Args:
+            qpos: [B, timesteps, nv]
+            qvel: [B, timesteps, nv]
+            qacc: [B, timesteps, nv]
+        Returns:
+            energy: [1,]
+    """
+    qpos_dot = torch.zeros_like(qvel)
+    qpos_dot[:, 1: -1] = (qpos[:, :-2] - qpos[:, 2:]) / (2 * dt)
+    qpos_dot[:, 0] = (-3*qpos[:, 0] + 4*qpos[:, 1] - qpos[:, 2]) / (2*dt)
+    qpos_dot[:, -1] = (3*qpos[:, -1] - 4*qpos[:, -2] + qpos[:, -3]) / (2*dt)
+
+    qvel_dot = torch.zeros_like(qacc)
+    qvel_dot[:, 1: -1] = (qvel[:, :-2] - qvel[:, 2:]) / (2 * dt)
+    qvel_dot[:, 0] = (-3*qvel[:, 0] + 4*qvel[:, 1] - qvel[:, 2]) / (2*dt)
+    qvel_dot[:, -1] = (3*qvel[:, -1] - 4*qvel[:, -2] + qvel[:, -3]) / (2*dt)
+
+    e1 = nn.functional.mse_loss(qpos_dot, qvel)
+    e2 = nn.functional.mse_loss(qvel_dot, qacc)
+
+    return e1+e2
+
+
+def compute_torque_consistency_energy(qpos: torch.Tensor, qvel:torch.Tensor, qacc: torch.Tensor, torque: torch.Tensor, torque_predictor: nn.Module) -> torch.Tensor:
+    """
+    """
+
+    predicted_torque = torque_predictor(qpos, qvel, qacc)
+
+    e = nn.functional.mse_loss(predicted_torque, torque)
+
+    return e
+
+
+from tqdm import trange
+
+def run_langevin_dynamics(x: torch.Tensor, torque_dim: int, qacc_dim: int, qvel_dim: int, dt: int, torque_predictor: nn.Module, num_steps: int, step_size: float, noise_scale: float) -> torch.Tensor:
+    seq_torque = x[:, :, :torque_dim].clone().requires_grad_(True)
+    seq_qacc = x[:, :, torque_dim:torque_dim+qacc_dim].clone().requires_grad_(True)
+    seq_qvel = x[:, :, torque_dim+qacc_dim:torque_dim+qacc_dim+qvel_dim].clone().requires_grad_(True)
+    seq_qpos = x[:, :, torque_dim+qacc_dim+qvel_dim:].clone().requires_grad_(True)
+
+    for i in trange(num_steps, desc='Runing Langevin Dynamics'):
+        e1 = compute_qpos_qvel_qacc_consistency_energy(seq_qpos, seq_qvel, seq_qacc, dt)
+        e2 = compute_torque_consistency_energy(seq_qpos, seq_qvel, seq_qacc, seq_torque, torque_predictor)
+
+        e = e1 + e2
+        print(f'Total Energy: {e}---Energy 1: {e1}---Energy 2: {e2}')
+        grad_torque, grad_qacc, grad_qvel, grad_qpos = torch.autograd.grad(e, [seq_torque, seq_qacc, seq_qvel, seq_qpos], )
+
+        noise_std = (2 * step_size * noise_scale) ** 0.5
+        seq_torque = seq_torque - step_size * grad_torque + noise_std * torch.randn_like(seq_torque)
+        seq_qacc = seq_qacc - step_size * grad_qacc + noise_std * torch.randn_like(seq_qacc)
+        seq_qvel = seq_qvel - step_size * grad_qvel + noise_std * torch.randn_like(seq_qvel)
+        seq_qpos = seq_qpos - step_size * grad_qpos + noise_std * torch.randn_like(seq_qpos)
+
+        seq_torque = seq_torque.detach().requires_grad_(True)
+        seq_qacc = seq_qacc.detach().requires_grad_(True)
+        seq_qvel = seq_qvel.detach().requires_grad_(True)
+        seq_qpos = seq_qpos.detach().requires_grad_(True)
+
+    new_x = torch.cat([seq_torque, seq_qacc, seq_qvel, seq_qpos], dim=-1)
+
+    return new_x
+
+
+def run_adam_optimization(
+    x: torch.Tensor,
+    torque_dim: int,
+    qacc_dim: int,
+    qvel_dim: int,
+    dt: float,
+    torque_predictor: nn.Module,
+    num_steps: int,
+    lr: float = 1e-3,
+    betas: tuple = (0.9, 0.999),
+    eps: float = 1e-8
+) -> torch.Tensor:
+    """
+    Optimize trajectory using Adam optimizer to minimize physics consistency energy.
+    
+    Args:
+        x: Input tensor of shape (batch, seq_len, torque_dim + qacc_dim + qvel_dim + qpos_dim)
+        torque_dim: Dimension of torque
+        qacc_dim: Dimension of acceleration
+        qvel_dim: Dimension of velocity
+        dt: Time step
+        torque_predictor: Module to predict torque from (qpos, qvel, qacc)
+        num_steps: Number of optimization steps
+        lr: Learning rate for Adam optimizer
+        betas: Coefficients for computing running averages of gradient and its square
+        eps: Term added to denominator for numerical stability
+    
+    Returns:
+        Optimized trajectory tensor
+    """
+    seq_torque = nn.Parameter(x[:, :, :torque_dim].clone())
+    seq_qacc = nn.Parameter(x[:, :, torque_dim:torque_dim+qacc_dim].clone())
+    seq_qvel = nn.Parameter(x[:, :, torque_dim+qacc_dim:torque_dim+qacc_dim+qvel_dim].clone())
+    seq_qpos = nn.Parameter(x[:, :, torque_dim+qacc_dim+qvel_dim:].clone())
+
+    optimizer = torch.optim.Adam(
+        [seq_torque, seq_qacc, seq_qvel, seq_qpos],
+        lr=lr,
+        betas=betas,
+        eps=eps
+    )
+
+    for i in trange(num_steps, desc='Running Adam Optimization'):
+        optimizer.zero_grad()
+        
+        e1 = compute_qpos_qvel_qacc_consistency_energy(seq_qpos, seq_qvel, seq_qacc, dt)
+        e2 = compute_torque_consistency_energy(seq_qpos, seq_qvel, seq_qacc, seq_torque, torque_predictor)
+
+        total_energy = e1 + e2
+        print(f'Total Energy: {total_energy.item():.6f}---Energy 1: {e1.item():.6f}---Energy 2: {e2.item():.6f}')
+        
+        total_energy.backward()
+        optimizer.step()
+
+    new_x = torch.cat([
+        seq_torque.data,
+        seq_qacc.data,
+        seq_qvel.data,
+        seq_qpos.data
+    ], dim=-1)
+
+    return new_x
+
+def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array):
+    model.opt.timestep = dt
+
+    data = mujoco.MjData(model)
+
+    data.qpos[:] = initial_qpos
+    data.qvel[:] = initial_qvel
+
+    seq_qpos = []
+    seq_qvel = []
+    seq_qacc = []
+
+    for i in range(num_steps-1):
+        data.ctrl[:] = seq_torque[i+1]
+        
+        mujoco.mj_step(model, data)
+
+        seq_qpos.append(data.qpos.copy())
+        seq_qvel.append(data.qvel.copy())
+        seq_qacc.append(data.qacc.copy())
+
+    seq_qpos = np.array(seq_qpos)
+    seq_qvel = np.array(seq_qvel)
+    seq_qacc = np.array(seq_qacc)
+
+    traj_recon = {
+        'seq_torque': seq_torque[1:],
+        'seq_qacc': seq_qacc,
+        'seq_qvel': seq_qvel,
+        'seq_qpos': seq_qpos
+    }
+
+    return traj_recon
+    
+from HNN import TorquePredictor
+import mujoco
+
+device = 'cuda:0'
+hnn_checkpoint_path = '/home/gsang/Projects/Perceiver_IO/checkpoints/HNN-epoch-epoch=99.ckpt'
+generated_h5_file_path = '/home/gsang/Projects/Perceiver_IO/data/traj_40000-steps_500.h5'
+mujoco_model_path = '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml'
+
+num_steps = 500
+dt = 0.0005
+model = mujoco.MjModel.from_xml_path(mujoco_model_path)
+
+hnn_checkpoint = torch.load(hnn_checkpoint_path)
+hnn_state_dict = hnn_checkpoint['state_dict']
+
+# Filter keys for torque_predictor and remove the prefix
+torque_predictor_state_dict = {
+    k.replace('torque_predictor.', ''): v 
+    for k, v in hnn_state_dict.items() 
+    if k.startswith('torque_predictor.')
+}
+
+
+torque_predictor = TorquePredictor(coordinate_dim=3).to(device)
+
+# Load into torque_predictor
+torque_predictor.load_state_dict(torque_predictor_state_dict)
+print(f"Loaded {len(torque_predictor_state_dict)} parameters into torque_predictor")
+
+import h5py
+
+with h5py.File(generated_h5_file_path, 'r') as f:
+    seq_qpos = torch.Tensor(f['traj_2']['seq_qpos'][:]).unsqueeze(0).to(device)
+    seq_qvel = torch.Tensor(f['traj_2']['seq_qvel'][:]).unsqueeze(0).to(device)
+    seq_qacc = torch.Tensor(f['traj_2']['seq_qacc'][:]).unsqueeze(0).to(device)
+    seq_torque = torch.Tensor(f['traj_2']['seq_torque'][:]).unsqueeze(0).to(device)
+
+# seq_qpos = torch.randn((1, 500, 3)).to(device)
+# seq_qvel = torch.randn((1, 500, 3)).to(device)
+# seq_qacc = torch.randn((1, 500, 3)).to(device)
+# seq_torque = torch.randn((1, 500, 3)).to(device)
+
+x = torch.cat([seq_torque, seq_qacc, seq_qvel, seq_qpos], dim=-1)
+traj_before = {
+    'seq_torque': seq_torque[0].clone(),
+    'seq_qacc': seq_qacc[0].clone(),
+    'seq_qvel': seq_qvel[0].clone(),
+    'seq_qpos': seq_qpos[0].clone()
+}
+
+visualize_trajectory(traj_before, '/home/gsang/Projects/Perceiver_IO/plots', 'traj_before_langevin')
+
+# new_x = run_langevin_dynamics(x, 3, 3, 3, 0.0005, torque_predictor, 20000, 1e-5, 1e-6)
+# new_x = run_adam_optimization(x, 3, 3, 3, 0.0005, torque_predictor, 10000)
+new_x = x.clone()
+new_x[0, :, :3] = torque_predictor(traj_before['seq_qpos'], traj_before['seq_qvel'], traj_before['seq_qacc'])
+
+torque_mse = nn.functional.mse_loss(new_x[0, :, :3], traj_before['seq_torque'])
+print(f'Torque MSE: {torque_mse.item()}')
+
+traj_after = {
+    'seq_torque': new_x[0, :, :3].clone(),
+    'seq_qacc': new_x[0, :, 3:6].clone(),
+    'seq_qvel': new_x[0, :, 6:9].clone(),
+    'seq_qpos': new_x[0, :, 9:].clone()
+}
+
+visualize_trajectory(traj_after, '/home/gsang/Projects/Perceiver_IO/plots', 'traj_after_langevin')
+
+initial_qpos = traj_before['seq_qpos'][0].cpu().numpy()
+initial_qvel = traj_before['seq_qvel'][0].cpu().numpy()
+seq_torque = traj_before['seq_torque'].cpu().numpy()
+traj_recon = reconstruct_traj_using_torque(model, 500, dt, initial_qpos, initial_qvel, seq_torque)
+visualize_trajectory(traj_recon, '/home/gsang/Projects/Perceiver_IO/plots', 'traj_after_recon')

@@ -70,7 +70,7 @@ DEFAULT_WANDB_RUN_NAME = 'Test order of the predicted qpos, qvel, and torque'
 # Mode Configuration
 # ===========================
 
-DEFAULT_MODE = "train"  # choices: ["train", "generate_samples"]
+DEFAULT_MODE = "generate_samples"  # choices: ["train", "generate_samples"]
 DEFAULT_DEVICE = "gpu"  # "gpu" if available, else "cpu" (handled dynamically)
 DEFAULT_NUM_DEVICES = 1
 

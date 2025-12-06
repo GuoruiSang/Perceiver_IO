@@ -113,11 +113,11 @@ class HNN(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(coordinate_dim + momenta_dim, 256),
-            nn.Tanh(),
+            nn.SiLU(),
             nn.Linear(256, 256),
-            nn.Tanh(),
+            nn.SiLU(),
             nn.Linear(256, 256),
-            nn.Tanh(),
+            nn.SiLU(),
             nn.Linear(256, 1),
         )
 
@@ -130,11 +130,11 @@ class TorquePredictor(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(3*coordinate_dim, 256),
-            nn.Tanh(),
+            nn.SiLU(),
             nn.Linear(256, 256),
-            nn.Tanh(),
+            nn.SiLU(),
             nn.Linear(256, 256),
-            nn.Tanh(),
+            nn.SiLU(),
             nn.Linear(256, 3),
         )
     
@@ -158,7 +158,10 @@ class HNNWrapper(pl.LightningModule):
     def forward(self, p, q): return self.model(p, q)
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=1e-4)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=1000)
+        
+        return {'optimizer': optimizer, 'lr_scheduler': scheduler}
 
     def calculate_loss(self, p, q, dqdt_target, dpdt_target, torque_target=None, qaccarget=None):
         with torch.set_grad_enabled(True):
@@ -286,10 +289,10 @@ if __name__ == "__main__":
     predict_torque = True
     use_torque = True
 
-    train_file = "/home/gsang/Projects/Perceiver_IO/data/traj_2000-steps_500.h5"
-    test_file = "/home/gsang/Projects/Perceiver_IO/data/traj_10-steps_500.h5"
+    train_file = "/home/gsang/Projects/Perceiver_IO/data/traj_40000-steps_500.h5"
+    test_file = "/home/gsang/Projects/Perceiver_IO/data/traj_2000-steps_500.h5"
 
-    test_checkpoint_file = "/home/gsang/Projects/Perceiver_IO/checkpoints/epoch-epoch=1999.ckpt"
+    test_checkpoint_file = "/home/gsang/Projects/Perceiver_IO/checkpoints/HNN-epoch-epoch=99.ckpt"
     if mode == 'train':
         print("-"*60)
         print(" "*25+"Start Training")
@@ -313,7 +316,7 @@ if __name__ == "__main__":
 
         checkpoint_callback = ModelCheckpoint(
             dirpath='Projects/Perceiver_IO/checkpoints',
-            filename='epoch-{epoch}',
+            filename='HNN-epoch-{epoch}',
             every_n_epochs=100,  # Save every 5 epochs
             save_top_k=-1)     # Keep all checkpoints (don't delete old ones)
 
@@ -338,7 +341,7 @@ if __name__ == "__main__":
     pl_model = HNNWrapper(dim, dim, use_torque=use_torque, predict_torque=predict_torque)
 
     trainer = pl.Trainer(
-        max_epochs=2000, 
+        max_epochs=1000, 
         accelerator='gpu', 
         devices=[5], 
         callbacks=[checkpoint_callback, verify_callback, progress_bar] if mode == 'train' else [], 
@@ -348,7 +351,7 @@ if __name__ == "__main__":
         )
 
     if mode == 'train':
-        trainer.fit(pl_model, train_loader, val_loader, ckpt_path=test_checkpoint_file)
+        trainer.fit(pl_model, train_loader, val_loader)
     elif mode == 'test':
         trainer.test(pl_model, test_loader, ckpt_path=test_checkpoint_file)
 

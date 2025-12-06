@@ -32,7 +32,7 @@ DEFAULT_TEST_DATAPATH_PATH = DATA_DIR / "traj_2000-steps_500.h5"
 # ===========================
 
 CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
-DEFAULT_RESUME_CHECKPOINT = CHECKPOINT_DIR / "/home/gsang/Projects/Perceiver_IO/checkpoints/trajectory_dpf_foward:epoch=179_val_loss:val_loss=0.0146.ckpt"
+DEFAULT_RESUME_CHECKPOINT = CHECKPOINT_DIR / "trajectory_dpf_foward:epoch=449_val_loss:val_loss=0.0340.ckpt"
 
 # ===========================
 # Output Paths
