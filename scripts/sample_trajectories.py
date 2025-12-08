@@ -36,6 +36,13 @@ def main():
                         help="Use EMA weights for sampling")
     parser.add_argument("--batch_size", type=int, default=10,
                         help="Number of trajectories to generate in each batch")
+    # Guidance parameters
+    parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin"], default="adam",
+                        help="Guidance method: 'adam' or 'langevin'")
+    parser.add_argument("--guidance_after_steps", type=int, default=0,
+                        help="Start guidance after this many diffusion steps")
+    parser.add_argument("--guidance_steps", type=int, default=0,
+                        help="Number of optimization steps per diffusion step (0 = disabled)")
     args = parser.parse_args()
     
     # Load model from checkpoint
@@ -69,6 +76,9 @@ def main():
             context_fraction=args.context_fraction,
             use_ema=args.use_ema,
             resample_context_every_step=args.resample_context,
+            guidance_method=args.guidance_method,
+            guidance_after_steps=args.guidance_after_steps,
+            guidance_steps=args.guidance_steps,
         )
         
         all_trajectories.append(trajectories.cpu())

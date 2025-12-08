@@ -348,7 +348,7 @@ def main():
     #------------------------------------------
     save_path = '/home/gsang/Projects/Perceiver_IO/data'
     xml_path = '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml'
-    num_steps = 500
+    num_steps = 2000
     num_trajectories = 40000  # Target number of available trajectories
     dt = 0.0005
     batch_size = 1000  # Generate in batches for efficiency

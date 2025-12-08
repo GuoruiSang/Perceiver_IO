@@ -113,11 +113,11 @@ class HNN(nn.Module):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(coordinate_dim + momenta_dim, 256),
-            nn.SiLU(),
+            nn.Tanh(),
             nn.Linear(256, 256),
-            nn.SiLU(),
+            nn.Tanh(),
             nn.Linear(256, 256),
-            nn.SiLU(),
+            nn.Tanh(),
             nn.Linear(256, 1),
         )
 
@@ -125,16 +125,42 @@ class HNN(nn.Module):
         x = torch.cat([p, q], dim=-1)
         return self.mlp(x)
 
+class SeperableHNN(nn.Module):
+    def __init__(self, coordinate_dim, momenta_dim):
+        super().__init__()
+        # Kinetic Energy T(p, q) - depends on both (mass matrix can vary with q)
+        self.kinetic = nn.Sequential(
+            nn.Linear(coordinate_dim + momenta_dim, 256),
+            nn.Tanh(),
+            nn.Linear(256, 256),
+            nn.Tanh(),
+            nn.Linear(256, 1),
+        )
+        
+        # Potential Energy V(q) - strictly only depends on q
+        self.potential = nn.Sequential(
+            nn.Linear(coordinate_dim, 256),
+            nn.Tanh(),
+            nn.Linear(256, 256),
+            nn.Tanh(),
+            nn.Linear(256, 1),
+        )
+
+    def forward(self, p, q):
+        T = self.kinetic(torch.cat([p, q], dim=-1))
+        V = self.potential(q)
+        return T + V
+
 class TorquePredictor(nn.Module):
     def __init__(self, coordinate_dim):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(3*coordinate_dim, 256),
-            nn.SiLU(),
+            nn.Tanh(),
             nn.Linear(256, 256),
-            nn.SiLU(),
+            nn.Tanh(),
             nn.Linear(256, 256),
-            nn.SiLU(),
+            nn.Tanh(),
             nn.Linear(256, 3),
         )
     
@@ -158,10 +184,11 @@ class HNNWrapper(pl.LightningModule):
     def forward(self, p, q): return self.model(p, q)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=1e-4)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=1000)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=1000)
         
-        return {'optimizer': optimizer, 'lr_scheduler': scheduler}
+        # return {'optimizer': optimizer, 'lr_scheduler': scheduler}
+        return optimizer
 
     def calculate_loss(self, p, q, dqdt_target, dpdt_target, torque_target=None, qaccarget=None):
         with torch.set_grad_enabled(True):
@@ -240,7 +267,7 @@ class HNNWrapper(pl.LightningModule):
             axes[i].scatter(timesteps, predicted_torque_np[:, i], s=2, alpha=0.6, label="predicted")
             axes[i].set_xlabel('Time Step')
             axes[i].set_ylabel(f'Torque[{i}]')
-            axes[i].set_ylim(-10, 10)
+            axes[i].set_ylim(-5, 5)
             axes[i].set_title(f'Torque Dim {i}, MSE: {np.mean((torque_np[:, i] - predicted_torque_np[:, i])**2):.6f}')
             axes[i].legend()
             axes[i].grid(True, alpha=0.3)
@@ -292,7 +319,7 @@ if __name__ == "__main__":
     train_file = "/home/gsang/Projects/Perceiver_IO/data/traj_40000-steps_500.h5"
     test_file = "/home/gsang/Projects/Perceiver_IO/data/traj_2000-steps_500.h5"
 
-    test_checkpoint_file = "/home/gsang/Projects/Perceiver_IO/checkpoints/HNN-epoch-epoch=99.ckpt"
+    test_checkpoint_file = "/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN-Tanh-epoch-epoch=459.ckpt"
     if mode == 'train':
         print("-"*60)
         print(" "*25+"Start Training")
@@ -316,14 +343,14 @@ if __name__ == "__main__":
 
         checkpoint_callback = ModelCheckpoint(
             dirpath='Projects/Perceiver_IO/checkpoints',
-            filename='HNN-epoch-{epoch}',
-            every_n_epochs=100,  # Save every 5 epochs
+            filename='SeperableHNN-Tanh-epoch-{epoch}',
+            every_n_epochs=10,  # Save every 5 epochs
             save_top_k=-1)     # Keep all checkpoints (don't delete old ones)
 
         verify_callback = PhysicsCheckCallback(check_every_n_epochs=1, dt=0.0005)  # Match training data dt!
         # Only refresh progress bar every 100 batches - prevents SSH lag!
         progress_bar = TQDMProgressBar(refresh_rate=100)
-        wandb_logger = WandbLogger(project='HNN_Hinge', name='HNN-3D-Hinge-With-PredictedTorque', save_dir='Projects/Perceiver_IO/wandb')
+        wandb_logger = WandbLogger(project='HNN_Hinge', name='SeperableHNN-3D-Hinge-With-PredictedTorque-Tanh', save_dir='Projects/Perceiver_IO/wandb')
         
     elif mode == 'test':
         print("-"*60)

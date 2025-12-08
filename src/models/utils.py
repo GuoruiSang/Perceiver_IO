@@ -14,6 +14,7 @@ import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import mujoco
 
 class EMA:
     """Exponential Moving Average (EMA) helper (not an nn.Module).
@@ -540,13 +541,16 @@ def compute_qpos_qvel_qacc_consistency_energy(qpos: torch.Tensor, qvel: torch.Te
         Returns:
             energy: [1,]
     """
+    # Central difference: f'(t) = (f(t+1) - f(t-1)) / (2*dt)
     qpos_dot = torch.zeros_like(qvel)
-    qpos_dot[:, 1: -1] = (qpos[:, :-2] - qpos[:, 2:]) / (2 * dt)
+    qpos_dot[:, 1:-1] = (qpos[:, 2:] - qpos[:, :-2]) / (2 * dt)
+    # Second-order forward difference at start
     qpos_dot[:, 0] = (-3*qpos[:, 0] + 4*qpos[:, 1] - qpos[:, 2]) / (2*dt)
+    # Second-order backward difference at end
     qpos_dot[:, -1] = (3*qpos[:, -1] - 4*qpos[:, -2] + qpos[:, -3]) / (2*dt)
 
     qvel_dot = torch.zeros_like(qacc)
-    qvel_dot[:, 1: -1] = (qvel[:, :-2] - qvel[:, 2:]) / (2 * dt)
+    qvel_dot[:, 1:-1] = (qvel[:, 2:] - qvel[:, :-2]) / (2 * dt)
     qvel_dot[:, 0] = (-3*qvel[:, 0] + 4*qvel[:, 1] - qvel[:, 2]) / (2*dt)
     qvel_dot[:, -1] = (3*qvel[:, -1] - 4*qvel[:, -2] + qvel[:, -3]) / (2*dt)
 
@@ -662,6 +666,45 @@ def run_adam_optimization(
 
     return new_x
 
+def compare_generated_with_reconstructed(
+    generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, name: str = 'comparison'
+):
+    """Compare generated trajectory with physics-reconstructed trajectory."""
+    import mujoco
+    
+    # Convert to numpy if needed
+    gen = {k: (v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v) for k, v in generated.items()}
+    
+    # Reconstruct using MuJoCo physics
+    model = mujoco.MjModel.from_xml_path(mujoco_model_path)
+    recon = reconstruct_traj_using_torque(
+        model, len(gen['seq_qpos']), dt,
+        gen['seq_qpos'][0], gen['seq_qvel'][0], gen['seq_torque']
+    )
+    
+    # Plot: generated[1:] vs reconstructed (both have length T-1)
+    keys = ['seq_qpos', 'seq_qvel', 'seq_qacc', 'seq_torque']
+    nrows, ncols = len(keys), max(v.shape[-1] for v in gen.values())
+    fig, axes = plt.subplots(nrows, ncols, figsize=(30, 10))
+    
+    for i, key in enumerate(keys):
+        gen_data, recon_data = gen[key][1:], recon[key]  # Align: generated[1:] vs reconstructed
+        t = np.arange(len(gen_data))
+        for j in range(gen_data.shape[-1]):
+            if j < ncols:
+                axes[i, j].scatter(t, gen_data[:, j], s=1, c='blue', label='Generated', alpha=0.7)
+                axes[i, j].scatter(t, recon_data[:, j], s=1, c='red', label='Reconstructed', alpha=0.7)
+                axes[i, j].set_title(f'{key}[{j}]')
+                axes[i, j].legend(markerscale=5)
+        for j in range(gen_data.shape[-1], ncols):
+            axes[i, j].set_visible(False)
+    
+    fig.tight_layout()
+    fig.savefig(os.path.join(save_path, f'{name}.jpg'))
+    plt.close(fig)
+    print(f"[Comparison] Saved to {os.path.join(save_path, name + '.jpg')}")
+
+
 def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array):
     model.opt.timestep = dt
 
@@ -675,7 +718,7 @@ def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos
     seq_qacc = []
 
     for i in range(num_steps-1):
-        data.ctrl[:] = seq_torque[i+1]
+        data.ctrl[:] = seq_torque[i]
         
         mujoco.mj_step(model, data)
 
@@ -688,7 +731,7 @@ def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos
     seq_qacc = np.array(seq_qacc)
 
     traj_recon = {
-        'seq_torque': seq_torque[1:],
+        'seq_torque': seq_torque[:-1],
         'seq_qacc': seq_qacc,
         'seq_qvel': seq_qvel,
         'seq_qpos': seq_qpos
@@ -700,7 +743,7 @@ from HNN import TorquePredictor
 import mujoco
 
 device = 'cuda:0'
-hnn_checkpoint_path = '/home/gsang/Projects/Perceiver_IO/checkpoints/HNN-epoch-epoch=99.ckpt'
+hnn_checkpoint_path = '/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN-Tanh-epoch-epoch=459.ckpt'
 generated_h5_file_path = '/home/gsang/Projects/Perceiver_IO/data/traj_40000-steps_500.h5'
 mujoco_model_path = '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml'
 
@@ -746,11 +789,10 @@ traj_before = {
     'seq_qpos': seq_qpos[0].clone()
 }
 
-visualize_trajectory(traj_before, '/home/gsang/Projects/Perceiver_IO/plots', 'traj_before_langevin')
-
-# new_x = run_langevin_dynamics(x, 3, 3, 3, 0.0005, torque_predictor, 20000, 1e-5, 1e-6)
-# new_x = run_adam_optimization(x, 3, 3, 3, 0.0005, torque_predictor, 10000)
-new_x = x.clone()
+compare_generated_with_reconstructed(traj_before, mujoco_model_path, '/home/gsang/Projects/Perceiver_IO/plots', 0.0005, 'comparison_before')
+# # new_x = run_langevin_dynamics(x, 3, 3, 3, 0.0005, torque_predictor, 20000, 1e-5, 1e-6)
+new_x = run_adam_optimization(x, 3, 3, 3, 0.0005, torque_predictor, 1)
+# new_x = x.clone()
 new_x[0, :, :3] = torque_predictor(traj_before['seq_qpos'], traj_before['seq_qvel'], traj_before['seq_qacc'])
 
 torque_mse = nn.functional.mse_loss(new_x[0, :, :3], traj_before['seq_torque'])
@@ -763,10 +805,10 @@ traj_after = {
     'seq_qpos': new_x[0, :, 9:].clone()
 }
 
-visualize_trajectory(traj_after, '/home/gsang/Projects/Perceiver_IO/plots', 'traj_after_langevin')
+compare_generated_with_reconstructed(traj_after, mujoco_model_path, '/home/gsang/Projects/Perceiver_IO/plots', 0.0005, 'comparison_after')
 
-initial_qpos = traj_before['seq_qpos'][0].cpu().numpy()
-initial_qvel = traj_before['seq_qvel'][0].cpu().numpy()
-seq_torque = traj_before['seq_torque'].cpu().numpy()
-traj_recon = reconstruct_traj_using_torque(model, 500, dt, initial_qpos, initial_qvel, seq_torque)
-visualize_trajectory(traj_recon, '/home/gsang/Projects/Perceiver_IO/plots', 'traj_after_recon')
+# initial_qpos = traj_before['seq_qpos'][0].cpu().numpy()
+# initial_qvel = traj_before['seq_qvel'][0].cpu().numpy()
+# seq_torque = traj_before['seq_torque'].cpu().numpy()
+# traj_recon = reconstruct_traj_using_torque(model, 500, dt, initial_qpos, initial_qvel, seq_torque)
+# visualize_trajectory(traj_recon, '/home/gsang/Projects/Perceiver_IO/plots', 'traj_after_recon')

@@ -61,7 +61,7 @@ from perceiver.model.core import (
     PerceiverDecoder,
     PerceiverEncoder,
 )
-from src.models.utils import EMA, visualize_trajectory
+from src.models.utils import EMA, visualize_trajectory, compare_generated_with_reconstructed, run_adam_optimization, run_langevin_dynamics
 from scripts.dataset import TrajectoryDPFCached
 from src import config
 from src.training.utils import compute_normalization_stats
@@ -549,7 +549,8 @@ class TrajectoryDPF(pl.LightningModule):
     def _predict_x0(self, x_t: torch.Tensor, eps: torch.Tensor, a_bar_t: torch.Tensor) -> torch.Tensor:
         """Predict x0 from noisy state x_t and predicted noise eps."""
         x0 = (x_t - torch.sqrt(1.0 - a_bar_t) * eps) / torch.sqrt(a_bar_t)
-        return torch.clamp(x0, -10.0, 10.0)
+        # return torch.clamp(x0, -10, 10)
+        return x0
     
     def _compute_legacy_sigma_t(
         self, a_bar_t: torch.Tensor, a_bar_prev: torch.Tensor, is_final_step: bool
@@ -561,7 +562,6 @@ class TrajectoryDPF(pl.LightningModule):
         return eta * torch.sqrt(torch.clamp((1.0 - a_bar_prev) / (1.0 - a_bar_t), min=0.0, max=1.0)) * \
                torch.sqrt(torch.clamp(1.0 - (a_bar_t / a_bar_prev), min=0.0, max=1.0))
     
-    @torch.no_grad()
     def sample_trajectories(
         self,
         num_samples: int,
@@ -571,6 +571,15 @@ class TrajectoryDPF(pl.LightningModule):
         use_ema: bool = True,
         resample_context_every_step: bool = True,
         sampler: str = "ddim",
+        # Guidance parameters (adam or langevin, mutually exclusive)
+        torque_predictor: nn.Module = None,
+        guidance_method: str = "adam",  # "adam" or "langevin"
+        guidance_after_steps: int = 0,  # Start guidance after this many diffusion steps (0 = always)
+        guidance_steps: int = 0,  # Number of optimization steps per diffusion step
+        guidance_lr: float = 1e-3,  # Learning rate for adam
+        langevin_step_size: float = 1e-5,  # Step size for langevin
+        langevin_noise_scale: float = 1e-6,  # Noise scale for langevin
+        dt: float = 0.0005,  # Timestep for physics consistency
     ) -> torch.Tensor:
         """
         Sample trajectories using DDPM, DDIM, or Legacy DDPM.
@@ -675,8 +684,9 @@ class TrajectoryDPF(pl.LightningModule):
             contexts = torch.gather(queries, 1, ctx_idx.unsqueeze(-1).expand(-1, -1, queries.shape[-1]))
             # contexts: [B, num_context, C] - subset of trajectory
             
-            # Predict noise for ALL queries using context subset
-            eps = self.model(contexts, queries)  # eps: [B, T, state_dim]
+            # Predict noise for ALL queries using context subset (no grad to save memory)
+            with torch.no_grad():
+                eps = self.model(contexts, queries)  # eps: [B, T, state_dim]
             
             # Extract state from queries (at the beginning of token structure)
             state_start = 0
@@ -724,6 +734,21 @@ class TrajectoryDPF(pl.LightningModule):
                 # DDIM update rule (deterministic, faster)
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
                 
+                # Apply guidance (adam or langevin) after guidance_after_steps
+                if torque_predictor is not None and guidance_steps > 0 and i >= guidance_after_steps:
+                    x0_phys = self.denormalize_state(x0)
+                    if guidance_method == "adam":
+                        x0_phys = run_adam_optimization(
+                            x0_phys, self.torque_dim, self.qacc_dim, self.qvel_dim,
+                            dt, torque_predictor, guidance_steps, guidance_lr
+                        )
+                    elif guidance_method == "langevin":
+                        x0_phys = run_langevin_dynamics(
+                            x0_phys, self.torque_dim, self.qacc_dim, self.qvel_dim,
+                            dt, torque_predictor, guidance_steps, langevin_step_size, langevin_noise_scale
+                        )
+                    x0 = self.normalize_state(x0_phys).detach()
+                
                 if i == 0:
                     print(f"[Sampling Debug] Step {i}: x0 after prediction - range: [{x0.min():.4f}, {x0.max():.4f}], has NaN: {torch.isnan(x0).any()}")
                 
@@ -734,6 +759,21 @@ class TrajectoryDPF(pl.LightningModule):
             elif sampler == "ddpm_legacy":
                 # Legacy DDPM: generalized DDIM with eta=1 (matches training code)
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
+                
+                # Apply guidance (adam or langevin) after guidance_after_steps
+                if torque_predictor is not None and guidance_steps > 0 and i >= guidance_after_steps:
+                    x0_phys = self.denormalize_state(x0)
+                    if guidance_method == "adam":
+                        x0_phys = run_adam_optimization(
+                            x0_phys, self.torque_dim, self.qacc_dim, self.qvel_dim,
+                            dt, torque_predictor, guidance_steps, guidance_lr
+                        )
+                    elif guidance_method == "langevin":
+                        x0_phys = run_langevin_dynamics(
+                            x0_phys, self.torque_dim, self.qacc_dim, self.qvel_dim,
+                            dt, torque_predictor, guidance_steps, langevin_step_size, langevin_noise_scale
+                        )
+                    x0 = self.normalize_state(x0_phys).detach()
                 
                 if i == 0:
                     print(f"[Sampling Debug] Step {i}: x0 after prediction - range: [{x0.min():.4f}, {x0.max():.4f}], has NaN: {torch.isnan(x0).any()}")
@@ -765,7 +805,8 @@ class TrajectoryDPF(pl.LightningModule):
         self,
         output_path: str,
         num_samples: int = 100,
-        trajectory_length: int = 1000,
+        trajectory_length: int = None,
+        guidance_after_steps: int = 0,
         **sample_kwargs
     ):
         """
@@ -774,11 +815,19 @@ class TrajectoryDPF(pl.LightningModule):
         Args:
             output_path: path to output h5 file
             num_samples: number of trajectories to generate
-            trajectory_length: length of each trajectory
+            trajectory_length: length of each trajectory (default: same as training trajectory length)
             **sample_kwargs: additional kwargs for sample_trajectories
         """
-        print(f"Generating {num_samples} trajectories...")
-        trajectories = self.sample_trajectories(num_samples, trajectory_length, **sample_kwargs)
+        # Default to training trajectory length if not specified
+        if trajectory_length is None:
+            trajectory_length = self.max_timesteps
+        
+        print(f"Generating {num_samples} trajectories of length {trajectory_length}...")
+        trajectories = self.sample_trajectories(
+            num_samples, trajectory_length, 
+            guidance_after_steps=guidance_after_steps, 
+            **sample_kwargs
+        )
         
         # Move to CPU and convert to numpy
         trajectories = trajectories.cpu().numpy()
@@ -842,6 +891,8 @@ def main():
     
     # Generation parameters
     parser.add_argument("--num_samples", type=int, default=config.DEFAULT_NUM_SAMPLES, help="Number of trajectories to generate")
+    parser.add_argument("--trajectory_length", type=int, default=500,
+                        help="Length of generated trajectories (default: same as training trajectory length)")
     parser.add_argument("--output_path", type=str, default=config.DEFAULT_OUTPUT_PATH,
                         help="Output path for generated samples")
     parser.add_argument("--sampler", type=str, choices=["ddpm", "ddim", "ddpm_legacy"], default=config.DEFAULT_SAMPLER,
@@ -852,6 +903,26 @@ def main():
                         help="Fraction of timesteps to use as context during sampling")
     parser.add_argument("--use_ema", type=bool, default=config.DEFAULT_USE_EMA,
                         help="Whether to use EMA weights for sampling")
+    
+    # Guidance and post-processing
+    parser.add_argument("--hnn_checkpoint", type=str, default='/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN-Tanh-epoch-epoch=459.ckpt',
+                        help="Path to HNN checkpoint for guidance during sampling and/or torque correction after sampling")
+    parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin"], default="adam",
+                        help="Guidance method: 'adam' or 'langevin' (mutually exclusive)")
+    parser.add_argument("--guidance_after_steps", type=int, default=0,
+                        help="Start guidance after this many diffusion steps (0 = from the beginning)")
+    parser.add_argument("--guidance_steps", type=int, default=10,
+                        help="Number of optimization steps per diffusion step (0 = disabled)")
+    parser.add_argument("--guidance_lr", type=float, default=1e-2,
+                        help="Learning rate for adam guidance")
+    parser.add_argument("--langevin_step_size", type=float, default=1e-5,
+                        help="Step size for langevin guidance")
+    parser.add_argument("--langevin_noise_scale", type=float, default=1e-6,
+                        help="Noise scale for langevin guidance")
+    parser.add_argument("--correct_torque", action="store_true",
+                        help="Replace generated torque with physics-consistent torque after sampling")
+    parser.add_argument("--seed", type=int, default=11,
+                        help="Random seed for reproducible sampling")
     
     # W&B arguments
     parser.add_argument("--wandb", type=bool, default=config.DEFAULT_WANDB_ENABLED, help="Enable Weights & Biases logging")
@@ -903,19 +974,91 @@ def main():
             print("[Sampling] WARNING: No EMA shadow found in checkpoint!")
             print("[Sampling] Proceeding with regular model weights.")
         
+        # Load torque predictor if needed for guidance or post-processing
+        torque_predictor = None
+        if args.hnn_checkpoint and (args.guidance_steps > 0 or args.correct_torque):
+            from src.models.HNN import TorquePredictor
+            print(f"[Sampling] Loading torque predictor from: {args.hnn_checkpoint}")
+            hnn_ckpt = torch.load(args.hnn_checkpoint, map_location=device)
+            hnn_state = {k.replace('torque_predictor.', ''): v 
+                         for k, v in hnn_ckpt['state_dict'].items() if k.startswith('torque_predictor.')}
+            torque_predictor = TorquePredictor(coordinate_dim=model.qpos_dim).to(device)
+            torque_predictor.load_state_dict(hnn_state)
+            torque_predictor.eval()
+            print(f"[Sampling] ✓ Torque predictor loaded")
+        
+        # Determine trajectory length (default to training length if not specified)
+        trajectory_length = args.trajectory_length if args.trajectory_length is not None else model.max_timesteps
+        
         # Generate samples
-        print(f"\nGenerating {args.num_samples} sample trajectories...")
+        print(f"\nGenerating {args.num_samples} sample trajectories of length {trajectory_length}...")
+        print(f"[Sampling] Training trajectory length: {model.max_timesteps}")
+        if trajectory_length != model.max_timesteps:
+            print(f"[Sampling] Extending trajectory length to: {trajectory_length}")
         print(f"[Sampling] Using sampler={args.sampler}, num_diffusion_steps={args.num_diffusion_steps}, "
-              f"context_fraction={args.context_fraction}, use_ema={args.use_ema}")
-        model.save_trajectories_to_h5(
-            output_path=args.output_path,
+              f"context_fraction={args.context_fraction}, use_ema={args.use_ema}, seed={args.seed}")
+        if args.guidance_steps > 0:
+            print(f"[Sampling] Guidance enabled: method={args.guidance_method}, after_steps={args.guidance_after_steps}, "
+                  f"steps={args.guidance_steps}, lr={args.guidance_lr}")
+        
+        # Set seed for reproducibility
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+        
+        trajectories = model.sample_trajectories(
             num_samples=args.num_samples,
-            trajectory_length=model.max_timesteps,
+            trajectory_length=trajectory_length,
             num_diffusion_steps=args.num_diffusion_steps,
             context_fraction=args.context_fraction,
             use_ema=args.use_ema,
             sampler=args.sampler,
+            torque_predictor=torque_predictor if args.guidance_steps > 0 else None,
+            guidance_method=args.guidance_method,
+            guidance_after_steps=args.guidance_after_steps,
+            guidance_steps=args.guidance_steps,
+            guidance_lr=args.guidance_lr,
+            langevin_step_size=args.langevin_step_size,
+            langevin_noise_scale=args.langevin_noise_scale,
         )
+        
+        # Post-process: Replace torque with physics-consistent torque
+        if args.correct_torque and torque_predictor is not None:
+            with torch.no_grad():
+                qpos = trajectories[:, :, model.torque_dim + model.qacc_dim + model.qvel_dim:]
+                qvel = trajectories[:, :, model.torque_dim + model.qacc_dim:model.torque_dim + model.qacc_dim + model.qvel_dim]
+                qacc = trajectories[:, :, model.torque_dim:model.torque_dim + model.qacc_dim]
+                corrected_torque = torque_predictor(qpos, qvel, qacc)
+                trajectories[:, :, :model.torque_dim] = corrected_torque
+            print(f"[Post-process] ✓ Torque corrected using HNN")
+        
+        # Compare first trajectory with physics reconstruction
+        traj_np = trajectories[0].cpu().numpy()
+        generated = {
+            'seq_torque': traj_np[:, :model.torque_dim],
+            'seq_qacc': traj_np[:, model.torque_dim:model.torque_dim + model.qacc_dim],
+            'seq_qvel': traj_np[:, model.torque_dim + model.qacc_dim:model.torque_dim + model.qacc_dim + model.qvel_dim],
+            'seq_qpos': traj_np[:, model.torque_dim + model.qacc_dim + model.qvel_dim:],
+        }
+        compare_generated_with_reconstructed(
+            generated, '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml',
+            '/home/gsang/Projects/Perceiver_IO/plots'
+        )
+        
+        # Save to h5
+        trajectories_np = trajectories.cpu().numpy()
+        os.makedirs(os.path.dirname(args.output_path) or '.', exist_ok=True)
+        import h5py
+        with h5py.File(args.output_path, 'w') as f:
+            f.attrs['num_trajectories'] = args.num_samples
+            f.attrs['num_steps'] = trajectory_length
+            for i in range(args.num_samples):
+                g = f.create_group(f'traj_{i}')
+                g.create_dataset('seq_torque', data=trajectories_np[i, :, :model.torque_dim], dtype='f8')
+                g.create_dataset('seq_qacc', data=trajectories_np[i, :, model.torque_dim:model.torque_dim + model.qacc_dim], dtype='f8')
+                g.create_dataset('seq_qvel', data=trajectories_np[i, :, model.torque_dim + model.qacc_dim:model.torque_dim + model.qacc_dim + model.qvel_dim], dtype='f8')
+                g.create_dataset('seq_qpos', data=trajectories_np[i, :, model.torque_dim + model.qacc_dim + model.qvel_dim:], dtype='f8')
+        
         print(f"Sample generation complete! Saved to {args.output_path}")
         return
     
