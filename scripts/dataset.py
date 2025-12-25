@@ -79,7 +79,7 @@ class TrajectoryHNNCached(Dataset):
     
     Use this for datasets that fit in memory. Much faster than HDF5 random access.
     """
-    def __init__(self, h5_path: str):
+    def __init__(self, h5_path: str, trajectory_length: int = 500):
         super().__init__()
         print(f"Loading dataset into memory from {h5_path}...")
         
@@ -135,7 +135,7 @@ class TrajectoryHNNCached(Dataset):
         }
 
 class TrajectoryDPFCached(Dataset):
-    def __init__(self, h5_path: str) -> None:
+    def __init__(self, h5_path: str, trajectory_length: int = 500) -> None:
         super().__init__()
 
         with h5py.File(h5_path, 'r') as f:
@@ -143,24 +143,21 @@ class TrajectoryDPFCached(Dataset):
             self.num_steps = f.attrs['num_steps']
 
             # Pre-allocate and load all data at once
-            self.all_seq_qpos, self.all_seq_qvel, self.all_seq_qacc, self.all_seq_torque = [], [], [], []
+            self.all_seq_qpos, self.all_seq_mom, self.all_seq_torque = [], [], []
 
             for i in range(self.num_traj):
                 traj = f[f'traj_{i}']
-                self.all_seq_qpos.append(traj['seq_qpos'][:])
-                self.all_seq_qvel.append(traj['seq_qvel'][:])
-                self.all_seq_qacc.append(traj['seq_qacc'][:])
-                self.all_seq_torque.append(traj['seq_torque'][:])
+                self.all_seq_qpos.append(traj['seq_qpos'][:trajectory_length])
+                self.all_seq_torque.append(traj['seq_torque'][:trajectory_length])
+                self.all_seq_mom.append(traj['seq_mom'][:trajectory_length])
 
         self.all_seq_qpos = torch.from_numpy(np.array(self.all_seq_qpos))
-        self.all_seq_qvel = torch.from_numpy(np.array(self.all_seq_qvel))
-        self.all_seq_qacc = torch.from_numpy(np.array(self.all_seq_qacc))
+        self.all_seq_mom = torch.from_numpy(np.array(self.all_seq_mom))
         self.all_seq_torque = torch.from_numpy(np.array(self.all_seq_torque))
 
         print("---------------Statistics--------------")
         print(f"Range of qpos: [{self.all_seq_qpos.max()} - {self.all_seq_qpos.min()}]; Std of qpos: {self.all_seq_qpos.std()}")
-        print(f"Range of qvel: [{self.all_seq_qvel.max()} - {self.all_seq_qvel.min()}]; Std of qvel: {self.all_seq_qvel.std()}")
-        print(f"Range of qacc: [{self.all_seq_qacc.max()} - {self.all_seq_qacc.min()}]; Std of qacc: {self.all_seq_qacc.std()}")
+        print(f"Range of mom: [{self.all_seq_mom.max()} - {self.all_seq_mom.min()}]; Std of mom: {self.all_seq_mom.std()}")
         print(f"Range of torque: [{self.all_seq_torque.max()} - {self.all_seq_torque.min()}]; Std of torque: {self.all_seq_torque.std()}")
 
     def __len__(self):
@@ -169,8 +166,7 @@ class TrajectoryDPFCached(Dataset):
     def __getitem__(self, index):
         return {
             'seq_qpos': self.all_seq_qpos[index],
-            'seq_qvel': self.all_seq_qvel[index],
-            'seq_qacc': self.all_seq_qacc[index],
+            'seq_mom': self.all_seq_mom[index],
             'seq_torque': self.all_seq_torque[index],
         }
 
