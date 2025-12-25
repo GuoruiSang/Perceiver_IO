@@ -787,15 +787,27 @@ def run_adam_optimization_hnn(
     return new_x
 
 def compare_generated_with_reconstructed(
-    generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, name: str = 'comparison'
+    generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, data_dt: float = None, name: str = 'comparison'
 ):
     """
     Compare generated trajectory with physics-reconstructed trajectory.
     
     Works with new data format: generated = {'seq_qpos', 'seq_mom', 'seq_torque'}
     Computes initial velocity from momentum using MuJoCo mass matrix.
+    
+    Args:
+        generated: dict with 'seq_qpos', 'seq_mom', 'seq_torque' at data_dt resolution
+        mujoco_model_path: Path to MuJoCo XML model
+        save_path: Directory to save comparison plot
+        dt: Fine simulation timestep
+        data_dt: Data collection timestep (default: dt for backwards compatibility)
+        name: Name for the output file
     """
     import mujoco
+    
+    # Default data_dt to dt for backwards compatibility
+    if data_dt is None:
+        data_dt = dt
     
     # Convert to numpy if needed
     gen = {k: (v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v) for k, v in generated.items()}
@@ -813,10 +825,11 @@ def compare_generated_with_reconstructed(
     mujoco.mj_fullM(model, M, data.qM)
     initial_qvel = np.linalg.solve(M, gen['seq_mom'][0])
     
-    # Reconstruct using MuJoCo physics
+    # Reconstruct using MuJoCo physics (with data_dt support)
     recon = reconstruct_traj_with_momentum(
         model, len(gen['seq_qpos']), dt,
-        gen['seq_qpos'][0], initial_qvel, gen['seq_torque']
+        gen['seq_qpos'][0], initial_qvel, gen['seq_torque'],
+        data_dt=data_dt
     )
     
     # Plot: generated[1:] vs reconstructed (both have length T-1)
@@ -842,8 +855,33 @@ def compare_generated_with_reconstructed(
     print(f"[Comparison] Saved to {os.path.join(save_path, name + '.jpg')}")
 
 
-def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array):
-    """Legacy reconstruction function returning (qpos, qvel, qacc, torque)."""
+def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array, data_dt: float = None):
+    """
+    Legacy reconstruction function returning (qpos, qvel, qacc, torque).
+    
+    Supports separate simulation timestep (dt) and data collection timestep (data_dt).
+    
+    Args:
+        model: MuJoCo model
+        num_steps: Number of data points to collect
+        dt: Fine simulation timestep
+        initial_qpos: Initial position
+        initial_qvel: Initial velocity
+        seq_torque: Torque sequence at data_dt resolution (num_steps, torque_dim)
+        data_dt: Data collection timestep (default: dt for backwards compatibility)
+    
+    Returns:
+        dict with 'seq_qpos', 'seq_qvel', 'seq_qacc', 'seq_torque' at data_dt resolution
+    """
+    # Default data_dt to dt for backwards compatibility
+    if data_dt is None:
+        data_dt = dt
+    
+    # Compute skip_steps
+    skip_steps = int(round(data_dt / dt))
+    if skip_steps < 1:
+        skip_steps = 1
+    
     model.opt.timestep = dt
 
     data = mujoco.MjData(model)
@@ -854,15 +892,22 @@ def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos
     seq_qpos = []
     seq_qvel = []
     seq_qacc = []
+    
+    num_sim_steps = (num_steps - 1) * skip_steps
 
-    for i in range(num_steps-1):
-        data.ctrl[:] = seq_torque[i]
+    # Run simulation at fine timestep, collect at coarse intervals
+    for i in range(num_sim_steps):
+        # Apply torque: each torque in seq_torque is held for skip_steps iterations
+        torque_idx = i // skip_steps
+        data.ctrl[:] = seq_torque[torque_idx]
         
         mujoco.mj_step(model, data)
 
-        seq_qpos.append(data.qpos.copy())
-        seq_qvel.append(data.qvel.copy())
-        seq_qacc.append(data.qacc.copy())
+        # Collect data at data_dt intervals (every skip_steps simulation steps)
+        if (i + 1) % skip_steps == 0:
+            seq_qpos.append(data.qpos.copy())
+            seq_qvel.append(data.qvel.copy())
+            seq_qacc.append(data.qacc.copy())
 
     seq_qpos = np.array(seq_qpos)
     seq_qvel = np.array(seq_qvel)
@@ -878,21 +923,36 @@ def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos
     return traj_recon
 
 
-def reconstruct_traj_with_momentum(model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array):
+def reconstruct_traj_with_momentum(model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array, data_dt: float = None):
     """
     Reconstruct trajectory from torque, returning (qpos, mom, torque).
     
+    Supports separate simulation timestep (dt) and data collection timestep (data_dt).
+    When data_dt > dt, the simulation runs at fine resolution but data is collected
+    at coarser intervals.
+    
     Args:
         model: MuJoCo model
-        num_steps: Number of timesteps
-        dt: Timestep
+        num_steps: Number of data points to collect
+        dt: Fine simulation timestep
         initial_qpos: Initial position
         initial_qvel: Initial velocity
-        seq_torque: Torque sequence
+        seq_torque: Torque sequence at data_dt resolution (num_steps, torque_dim)
+                   Each torque is held constant for skip_steps simulation steps
+        data_dt: Data collection timestep (default: dt for backwards compatibility)
     
     Returns:
-        dict with 'seq_qpos', 'seq_mom', 'seq_torque'
+        dict with 'seq_qpos', 'seq_mom', 'seq_torque' at data_dt resolution
     """
+    # Default data_dt to dt for backwards compatibility
+    if data_dt is None:
+        data_dt = dt
+    
+    # Compute skip_steps
+    skip_steps = int(round(data_dt / dt))
+    if skip_steps < 1:
+        skip_steps = 1
+    
     model.opt.timestep = dt
     data = mujoco.MjData(model)
 
@@ -902,16 +962,23 @@ def reconstruct_traj_with_momentum(model, num_steps: int, dt: float, initial_qpo
     seq_qpos = []
     seq_mom = []
     M = np.zeros((model.nv, model.nv))
+    
+    num_sim_steps = (num_steps - 1) * skip_steps
 
-    for i in range(num_steps-1):
-        data.ctrl[:] = seq_torque[i]
+    # Run simulation at fine timestep, collect at coarse intervals
+    for i in range(num_sim_steps):
+        # Apply torque: each torque in seq_torque is held for skip_steps iterations
+        torque_idx = i // skip_steps
+        data.ctrl[:] = seq_torque[torque_idx]
         mujoco.mj_step(model, data)
         
-        # Compute mass matrix and momentum
-        mujoco.mj_fullM(model, M, data.qM)
-        
-        seq_qpos.append(data.qpos.copy())
-        seq_mom.append((M @ data.qvel).copy())
+        # Collect data at data_dt intervals (every skip_steps simulation steps)
+        if (i + 1) % skip_steps == 0:
+            # Compute mass matrix and momentum
+            mujoco.mj_fullM(model, M, data.qM)
+            
+            seq_qpos.append(data.qpos.copy())
+            seq_mom.append((M @ data.qvel).copy())
 
     traj_recon = {
         'seq_qpos': np.array(seq_qpos),

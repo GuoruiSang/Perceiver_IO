@@ -27,6 +27,8 @@ class PhysicsCheckCallback(pl.Callback):
         self.dt = dt  # Must match training data timestep!
 
     def on_validation_epoch_end(self, trainer, pl_module):
+        if trainer.global_rank != 0:
+            return
         if trainer.current_epoch % self.check_every_n_epochs != 0:
             return
         
@@ -42,6 +44,7 @@ class PhysicsCheckCallback(pl.Callback):
 
         M = np.zeros((model.nv, model.nv))
         mujoco.mj_forward(model, data)
+        # Use mj_fullM instead of obsolete MjModel functions
         mujoco.mj_fullM(model, M, data.qM)
 
         seq_qpos = [data.qpos.copy()]
@@ -64,14 +67,12 @@ class PhysicsCheckCallback(pl.Callback):
         seq_mom = np.array(seq_mom)
         seq_true_energy = np.array(seq_true_energy)
         
-        # Compute learned H
-        seq_H = []
-        for i in range(len(seq_qpos)):
-            p_tensor = torch.from_numpy(seq_mom[i]).float().to(device)
-            q_tensor = torch.from_numpy(seq_qpos[i]).float().to(device)
-            H_val = pl_module.model(p_tensor, q_tensor).detach().cpu().numpy()
-            seq_H.append(H_val)
-        seq_H = np.array(seq_H).flatten()
+        # Compute learned H - Vectorized for speed!
+        with torch.no_grad():
+            p_tensor = torch.from_numpy(seq_mom).float().to(device)
+            q_tensor = torch.from_numpy(seq_qpos).float().to(device)
+            # Use pl_module() instead of pl_module.model() to ensure scaling is applied
+            seq_H = pl_module(p_tensor, q_tensor).cpu().numpy().flatten()
         
         # Debug: Check if trajectory stays in training distribution
         q_min, q_max = seq_qpos.min(), seq_qpos.max()
@@ -112,13 +113,13 @@ class HNN(nn.Module):
     def __init__(self, coordinate_dim, momenta_dim):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(coordinate_dim + momenta_dim, 256),
+            nn.Linear(coordinate_dim + momenta_dim, 128),
             nn.Tanh(),
-            nn.Linear(256, 256),
+            nn.Linear(128, 128),
             nn.Tanh(),
-            nn.Linear(256, 256),
+            nn.Linear(128, 128),
             nn.Tanh(),
-            nn.Linear(256, 1),
+            nn.Linear(128, 1),
         )
 
     def forward(self, p, q):
@@ -129,8 +130,11 @@ class SeperableHNN(nn.Module):
     def __init__(self, coordinate_dim, momenta_dim):
         super().__init__()
         # Kinetic Energy T(p, q) - depends on both (mass matrix can vary with q)
+        # Increased depth and switched to Tanh for better gradient flow
         self.kinetic = nn.Sequential(
             nn.Linear(coordinate_dim + momenta_dim, 256),
+            nn.Tanh(),
+            nn.Linear(256, 256),
             nn.Tanh(),
             nn.Linear(256, 256),
             nn.Tanh(),
@@ -140,6 +144,8 @@ class SeperableHNN(nn.Module):
         # Potential Energy V(q) - strictly only depends on q
         self.potential = nn.Sequential(
             nn.Linear(coordinate_dim, 256),
+            nn.Tanh(),
+            nn.Linear(256, 256),
             nn.Tanh(),
             nn.Linear(256, 256),
             nn.Tanh(),
@@ -172,49 +178,85 @@ class TorquePredictor(nn.Module):
 # 3. HNN Wrapper
 # -----------------------------------------------------------------------------
 class HNNWrapper(pl.LightningModule):
-    def __init__(self, coordinate_dim, momenta_dim, use_torque=True, predict_torque=True):
+    def __init__(self, coordinate_dim, momenta_dim, use_torque=True, predict_torque=True, 
+                 qvel_var=1.0, mom_dot_var=1.0, q_std=1.0, p_std=1.0):
         super().__init__()
         self.save_hyperparameters()  # Save hyperparameters for checkpoint loading
-        self.model = HNN(coordinate_dim, momenta_dim)
+        self.model = SeperableHNN(coordinate_dim, momenta_dim)
         self.use_torque = use_torque
         self.predict_torque = predict_torque
         if self.use_torque and self.predict_torque:
             self.torque_predictor = TorquePredictor(coordinate_dim)
+        
+        # Variances for loss normalization (calculated from dataset statistics)
+        # Using register_buffer so they are moved to the correct device but not trained
+        self.register_buffer('qvel_var', torch.tensor(float(qvel_var)))
+        self.register_buffer('mom_dot_var', torch.tensor(float(mom_dot_var)))
+        
+        # Input scaling statistics
+        self.register_buffer('q_std', torch.tensor(float(q_std)))
+        self.register_buffer('p_std', torch.tensor(float(p_std)))
 
-    def forward(self, p, q): return self.model(p, q)
+    def forward(self, p, q): 
+        # Apply scaling during inference if needed
+        p_scaled = p / self.p_std
+        q_scaled = q / self.q_std
+        return self.model(p_scaled, q_scaled)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
-        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=1000)
-        
-        # return {'optimizer': optimizer, 'lr_scheduler': scheduler}
-        return optimizer
+        # Reduced LR and added weight decay as per plan
+        optimizer = torch.optim.Adam(self.parameters(), lr=5e-4, weight_decay=1e-4, fused=True)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=10, verbose=True
+        )
+        return {
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': scheduler,
+                'monitor': 'val_loss',
+            }
+        }
 
-    def calculate_loss(self, p, q, dqdt_target, dpdt_target, torque_target=None, qaccarget=None):
-        with torch.set_grad_enabled(True):
-            p = p.requires_grad_(True); q = q.requires_grad_(True)
-            H = self.model(p, q)
-            grads = torch.autograd.grad(H.sum(), (p, q), create_graph=True)
-            dqdt_pred, dpdt_pred = grads[0], -grads[1]
-            # Use ground-truth torque
-            if self.use_torque and not self.predict_torque:
-                dpdt_pred = dpdt_pred + torque_target
-                loss_torque = None
-            # Use predicted torque
-            elif self.use_torque and self.predict_torque:
-                # Use dqdt_target or dqdt_pred?
-                torque_pred = self.torque_predictor(q, dqdt_target, qaccarget)
-                dpdt_pred = dpdt_pred + torque_pred
-                loss_torque = nn.functional.mse_loss(torque_target, torque_pred)
+    def calculate_loss(self, p, q, dqdt_target, dpdt_target, torque_target=None, qacc_target=None):
+        loss_torque = None
+        # Physically-consistent input scaling:
+        # Scale inputs, then adjust gradients by the same factor (chain rule)
+        with torch.inference_mode(False):
+            with torch.set_grad_enabled(True):
+                p_raw = p.detach().requires_grad_(True)
+                q_raw = q.detach().requires_grad_(True)
+                
+                # Scaled inputs for the network
+                p_scaled = p_raw / self.p_std
+                q_scaled = q_raw / self.q_std
+                
+                H = self.model(p_scaled, q_scaled)
+                
+                # dH/dp_raw = (dH/dp_scaled) * (dp_scaled/dp_raw) = (dH/dp_scaled) / p_std
+                # However, autograd.grad with respect to p_raw handles this automatically
+                # if we define H in terms of p_raw.
+                grads = torch.autograd.grad(H.sum(), (p_raw, q_raw), create_graph=True)
+                dqdt_pred, dpdt_pred = grads[0], -grads[1]
+                
+                # Use ground-truth torque
+                if self.use_torque and not self.predict_torque:
+                    dpdt_pred = dpdt_pred + torque_target
+                # Use predicted torque
+                elif self.use_torque and self.predict_torque:
+                    torque_pred = self.torque_predictor(q_raw, dqdt_target, qacc_target)
+                    dpdt_pred = dpdt_pred + torque_pred
+                    loss_torque = nn.functional.mse_loss(torque_target, torque_pred)
                 
 
-        loss_dqdt = nn.functional.mse_loss(dqdt_target, dqdt_pred)
-        loss_dpdt = nn.functional.mse_loss(dpdt_target, dpdt_pred)
+        # Normalized MSE loss: MSE / Variance
+        loss_dqdt = nn.functional.mse_loss(dqdt_target, dqdt_pred) / self.qvel_var
+        loss_dpdt = nn.functional.mse_loss(dpdt_target, dpdt_pred) / self.mom_dot_var
 
+        # Balanced loss
         loss = loss_dqdt + loss_dpdt
         if loss_torque is not None:
             loss += loss_torque
-            self.log('loss_torque', loss_torque.item(), prog_bar=True, on_epoch=True)
+            self.log('loss_torque', loss_torque.item(), prog_bar=True, on_epoch=True, sync_dist=False)
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -228,10 +270,11 @@ class HNNWrapper(pl.LightningModule):
         loss = self.calculate_loss(batch['mom'], batch['qpos'], 
                                    batch['qvel'], batch['mom_dot'], 
                                    batch.get('torque', None), batch.get('qacc', None))
-        self.log('val_loss', loss, prog_bar=True)
+        self.log('val_loss', loss, prog_bar=True, sync_dist=False)
 
-        predicted_torque = self.torque_predictor(batch['qpos'], batch['qvel'], batch['qacc'])
-        self.log('torque loss', nn.functional.mse_loss(batch['torque'], predicted_torque), on_epoch=True)
+        if self.use_torque and self.predict_torque:
+            predicted_torque = self.torque_predictor(batch['qpos'], batch['qvel'], batch['qacc'])
+            self.log('torque loss', nn.functional.mse_loss(batch['torque'], predicted_torque), on_epoch=True, sync_dist=False)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -244,7 +287,8 @@ class HNNWrapper(pl.LightningModule):
         qacc = batch['qacc']
         torque = batch['torque']
 
-        H = self.model(mom, qpos)
+        # Use self() instead of self.model() to apply scaling
+        H = self(mom, qpos)
 
 
         predicted_torque = self.torque_predictor(qpos, qvel, qacc)
@@ -276,35 +320,65 @@ class HNNWrapper(pl.LightningModule):
         plt.savefig('/home/gsang/Projects/Perceiver_IO/data/torque_comparison.jpg')
         plt.close()
 
-        dt = 0.0005
-        dHdt = torch.zeros_like(H)
-        dHdt[1:-1] = (H[2:] - H[:-2]) / (2*dt)
-        dHdt[0] = (-3*H[0] + 4*H[1] - H[2]) / (2.0*dt)
-        dHdt[-1] = (3*H[-1] - 4*H[-2] + H[-3]) / (2.0*dt)
+        dt = 0.0001
+        
+        # Compute dH/dt analytically using chain rule:
+        # dH/dt = (∂H/∂q)^T * q_dot + (∂H/∂p)^T * p_dot
+        # where p_dot = -∂H/∂q + torque (Hamilton's equation with external torque)
+        
+        # IMPORTANT: PyTorch Lightning runs test/val under inference_mode/no_grad by default.
+        # torch.set_grad_enabled(True) does NOT override inference_mode, so we must disable it here.
+        with torch.inference_mode(False):
+            with torch.enable_grad():
+                mom_grad = mom.detach().clone().requires_grad_(True)
+                qpos_grad = qpos.detach().clone().requires_grad_(True)
 
-        dHdt_pred = torch.einsum('b i, b i -> b', predicted_torque, qvel).unsqueeze(-1)
+                # Recompute H with gradients enabled using the wrapper to handle scaling
+                H_for_grad = self(mom_grad, qpos_grad)
+
+                # Compute gradients ∂H/∂p and ∂H/∂q
+                dH_dp, dH_dq = torch.autograd.grad(
+                    H_for_grad.sum(),
+                    (mom_grad, qpos_grad),
+                    create_graph=False,
+                )
+
+                # Compute p_dot using Hamilton's equation: p_dot = -∂H/∂q + torque
+                p_dot = -dH_dq + predicted_torque
+
+                # dH/dt = (∂H/∂q)^T * qvel + (∂H/∂p)^T * p_dot
+                dHdt = (
+                    torch.sum(dH_dq * qvel, dim=-1, keepdim=True)
+                    + torch.sum(dH_dp * p_dot, dim=-1, keepdim=True)
+                )  # [B, 1]
+
+        # Power: v^T * predicted_torque (expected dH/dt for energy conservation)
+        dHdt_pred = torch.einsum('b i, b i -> b', qvel, predicted_torque).unsqueeze(-1)
 
         t = np.arange(1, dHdt.shape[0]+1)
 
         # Debugging Statistics
-        print(f"\n--- Debugging Statistics ---")
+        print(f"\n--- Debugging Statistics (Analytical dH/dt) ---")
         print(f"H shape: {H.shape}")
         print(f"H stats: Mean={H.mean().item():.4e}, Std={H.std().item():.4e}, Min={H.min().item():.4e}, Max={H.max().item():.4e}")
-        print(f"dHdt stats: Mean={dHdt.mean().item():.4e}, Std={dHdt.std().item():.4e}, Min={dHdt.min().item():.4e}, Max={dHdt.max().item():.4e}")
-        print(f"Power (tau*qvel) stats: Mean={dHdt_pred.mean().item():.4e}, Std={dHdt_pred.std().item():.4e}, Min={dHdt_pred.min().item():.4e}, Max={dHdt_pred.max().item():.4e}")
+        print(f"dH/dp (velocity) stats: Mean={dH_dp.mean().item():.4e}, Std={dH_dp.std().item():.4e}")
+        print(f"dH/dq stats: Mean={dH_dq.mean().item():.4e}, Std={dH_dq.std().item():.4e}")
+        print(f"dH/dt (analytical) stats: Mean={dHdt.mean().item():.4e}, Std={dHdt.std().item():.4e}, Min={dHdt.min().item():.4e}, Max={dHdt.max().item():.4e}")
+        print(f"Power (v^T * predicted_torque) stats: Mean={dHdt_pred.mean().item():.4e}, Std={dHdt_pred.std().item():.4e}, Min={dHdt_pred.min().item():.4e}, Max={dHdt_pred.max().item():.4e}")
 
         
         mse = nn.functional.mse_loss(dHdt, dHdt_pred)
-        print(f"Mean of ||dHdt-(predicted_torque.T * qvel)||^2: {mse}")
-        print(f"Explanation: The large MSE in dH/dt is likely due to noise amplification. \nSmall fluctuations in H (std={H.std().item():.2e}) divided by dt ({dt}) cause large dH/dt values.")
+        print(f"MSE between dH/dt and v^T * predicted_torque: {mse.item():.6e}")
         print(f"----------------------------\n")
         plt.figure(figsize=(10, 5))
-        plt.scatter(t, dHdt.detach().cpu().numpy(), label='dH/dt', s=1)
-        plt.scatter(t, dHdt_pred.detach().cpu().numpy(), label='predicted_torque.T * qvel', s=1)
-        plt.title(f'Comparison of dHdt and predicted_torque.T * qvel. MSE: {mse.item()}')
+        plt.scatter(t, dHdt.detach().cpu().numpy(), label='dH/dt (analytical)', s=1)
+        plt.scatter(t, dHdt_pred.detach().cpu().numpy(), label='v^T * predicted_torque', s=1)
+        plt.title(f'dH/dt = (∂H/∂q)ᵀq̇ + (∂H/∂p)ᵀṗ vs v^T*τ. MSE: {mse.item():.4e}')
+        plt.xlabel('Time Step')
+        plt.ylabel('Energy Rate')
         plt.legend()
-        plt.savefig('/home/gsang/Projects/Perceiver_IO/data/validation_with_torque_predictor.jpg')
-        print(f"Mean of ||dHdt-(predicted_torque.T * qvel)||^2: {nn.functional.mse_loss(dHdt, dHdt_pred)}")
+        plt.savefig('/home/gsang/Projects/Perceiver_IO/data/validation_with_predicted_torque_predictor.jpg')
+        print(f"MSE(dH/dt, v^T * torque): {mse.item():.6e}")
 
 # -----------------------------------------------------------------------------
 # 5. Main
@@ -312,12 +386,15 @@ class HNNWrapper(pl.LightningModule):
 
 
 if __name__ == "__main__":
-    mode = 'test' # 'train' or 'test'
-    predict_torque = True
+    # Optimize matmul performance for NVIDIA A100 GPUs
+    torch.set_float32_matmul_precision('high')
+    
+    mode = 'train' # 'train' or 'test'
+    predict_torque = False
     use_torque = True
 
-    train_file = "/home/gsang/Projects/Perceiver_IO/data/traj_40000-steps_500.h5"
-    test_file = "/home/gsang/Projects/Perceiver_IO/data/traj_2000-steps_500.h5"
+    train_file = "/home/gsang/Projects/Perceiver_IO/data/traj_40000-steps_4000.h5"
+    test_file = "/home/gsang/Projects/Perceiver_IO/data/traj_4000-steps_4000.h5"
 
     test_checkpoint_file = "/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN-Tanh-epoch-epoch=459.ckpt"
     if mode == 'train':
@@ -326,7 +403,7 @@ if __name__ == "__main__":
         print("-"*60)
         print(f"Loading dataset from {train_file}...")
 
-        full_dataset = TrajectoryHNNCached(train_file)
+        full_dataset = TrajectoryHNNCached(train_file, trajectory_length=1000)
         
         # Split into train/val (e.g., 90/10 split)
         # If the file has 2000 samples, this gives 1800 train, 200 val
@@ -337,20 +414,37 @@ if __name__ == "__main__":
         train_data = full_dataset
         val_data = TrajectoryHNNCached(test_file)
         
-        train_loader = DataLoader(train_data, batch_size=8192, shuffle=True, num_workers=20, pin_memory=True)
-        val_loader = DataLoader(val_data, batch_size=8192, shuffle=False, num_workers=20, pin_memory=True)
+        # Reduced batch size for faster convergence
+        batch_size_per_gpu = 4096
+        
+        train_loader = DataLoader(
+            train_data, 
+            batch_size=batch_size_per_gpu, 
+            shuffle=True, 
+            num_workers=4, 
+            pin_memory=True,
+            persistent_workers=True
+        )
+        val_loader = DataLoader(
+            val_data, 
+            batch_size=batch_size_per_gpu, 
+            shuffle=False, 
+            num_workers=4, 
+            pin_memory=True,
+            persistent_workers=True
+        )
 
 
         checkpoint_callback = ModelCheckpoint(
             dirpath='Projects/Perceiver_IO/checkpoints',
-            filename='SeperableHNN-Tanh-epoch-{epoch}',
-            every_n_epochs=10,  # Save every 5 epochs
+            filename='SeperableHNN(dim128)-Weighted-CELU-LN-epoch-{epoch}',
+            every_n_epochs=10,  # Save every 20 epochs to reduce I/O
             save_top_k=-1)     # Keep all checkpoints (don't delete old ones)
 
-        verify_callback = PhysicsCheckCallback(check_every_n_epochs=1, dt=0.0005)  # Match training data dt!
+        verify_callback = PhysicsCheckCallback(check_every_n_epochs=10, dt=0.0005)  # Run less frequently
         # Only refresh progress bar every 100 batches - prevents SSH lag!
         progress_bar = TQDMProgressBar(refresh_rate=100)
-        wandb_logger = WandbLogger(project='HNN_Hinge', name='SeperableHNN-3D-Hinge-With-PredictedTorque-Tanh', save_dir='Projects/Perceiver_IO/wandb')
+        wandb_logger = WandbLogger(project='HNN_Hinge', name='SeperableHNN(dim256)-3D-Hinge-ScaledInputs-Tanh', save_dir='Projects/Perceiver_IO/wandb')
         
     elif mode == 'test':
         print("-"*60)
@@ -358,23 +452,39 @@ if __name__ == "__main__":
         print("-"*60)
         test_data = TrajectoryHNNCached(test_file)
         
-        test_loader = DataLoader(test_data, batch_size=500, shuffle=False, num_workers=4)
+        test_loader = DataLoader(test_data, batch_size=8192*2, shuffle=False, num_workers=4)
         
-    # Detect dimension from dataset
+    # Detect dimension and statistics from dataset
     sample = train_data[0] if mode == 'train' else test_data[0]
     dim = sample['qpos'].shape[0]
     print(f"Detected dataset dimension: {dim}")
+    
+    qvel_var, mom_dot_var = 1.0, 1.0
+    q_std, p_std = 1.0, 1.0
+    if mode == 'train':
+        qvel_var = train_data.qvel.var().item()
+        mom_dot_var = train_data.mom_dot.var().item()
+        q_std = train_data.qpos.std().item()
+        p_std = train_data.mom.std().item()
+        print(f"Calculated dataset statistics:")
+        print(f"  - qvel_var: {qvel_var:.4f}, mom_dot_var: {mom_dot_var:.4f}")
+        print(f"  - q_std: {q_std:.4f}, p_std: {p_std:.4f}")
 
-    pl_model = HNNWrapper(dim, dim, use_torque=use_torque, predict_torque=predict_torque)
-
+    pl_model = HNNWrapper(dim, dim, use_torque=use_torque, predict_torque=predict_torque,
+                          qvel_var=qvel_var, mom_dot_var=mom_dot_var,
+                          q_std=q_std, p_std=p_std)
+    
     trainer = pl.Trainer(
         max_epochs=1000, 
         accelerator='gpu', 
-        devices=[5], 
+        devices=[0,1], 
+        strategy='ddp_find_unused_parameters_true',
+        # Use float32 for better gradient stability and precision in HNNs
+        precision=32,
         callbacks=[checkpoint_callback, verify_callback, progress_bar] if mode == 'train' else [], 
         logger=wandb_logger if mode == 'train' else None,
         enable_progress_bar=True,
-        log_every_n_steps=50,
+        log_every_n_steps=200, # Reduce logging frequency
         )
 
     if mode == 'train':

@@ -51,9 +51,9 @@ DEFAULT_LOG_EVERY_N_STEPS = 10
 # Sampling/Generation Parameters
 # ===========================
 
-DEFAULT_NUM_SAMPLES = 10
+DEFAULT_NUM_SAMPLES = 2
 DEFAULT_SAMPLER = "ddim"  # choices: ["ddpm", "ddim", "ddpm_legacy"]
-DEFAULT_NUM_DIFFUSION_STEPS = 50
+DEFAULT_NUM_DIFFUSION_STEPS = 1000
 DEFAULT_CONTEXT_FRACTION = 0.7
 DEFAULT_USE_EMA = True
 
@@ -64,15 +64,14 @@ DEFAULT_USE_EMA = True
 DEFAULT_WANDB_ENABLED = True
 DEFAULT_WANDB_PROJECT = "trajectory-dpf-smooth"
 DEFAULT_WANDB_ENTITY = None
-DEFAULT_WANDB_RUN_NAME = 'Test order of the predicted qpos, qvel, and torque'
+DEFAULT_WANDB_RUN_NAME = 'Position&Momentum|Torque'
 
 # ===========================
 # Mode Configuration
 # ===========================
 
-DEFAULT_MODE = "generate_samples"  # choices: ["train", "generate_samples"]
+DEFAULT_MODE = "train"  # choices: ["train", "generate_samples"]
 DEFAULT_DEVICE = "gpu"  # "gpu" if available, else "cpu" (handled dynamically)
-DEFAULT_NUM_DEVICES = 1
 
 # ===========================
 # Normalization Configuration (Data preprocessing)

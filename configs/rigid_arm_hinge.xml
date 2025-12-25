@@ -1,5 +1,5 @@
 <mujoco>
-  <option gravity="0 0 -9.81" integrator="RK4"/>
+  <option gravity="0 0 -9.81" integrator="implicit"/>
   <default>
     <joint damping="0" frictionloss="0" armature="0"/>
     <geom contype="0" conaffinity="0"/>

@@ -141,6 +141,11 @@ class TrajectoryDPFCached(Dataset):
         with h5py.File(h5_path, 'r') as f:
             self.num_traj = f.attrs['num_trajectories']
             self.num_steps = f.attrs['num_steps']
+            
+            # Load simulation metadata (with defaults for backwards compatibility)
+            self.dt = f.attrs.get('dt', 0.0001)
+            self.data_dt = f.attrs.get('data_dt', 0.00025)
+            self.xml = f.attrs.get('xml', None)
 
             # Pre-allocate and load all data at once
             self.all_seq_qpos, self.all_seq_mom, self.all_seq_torque = [], [], []

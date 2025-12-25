@@ -25,14 +25,14 @@ SRC_ROOT = Path(__file__).parent  # /path/to/src
 # ===========================
 
 DATA_DIR = PROJECT_ROOT / "data"
-DEFAULT_DATASET_PATH = DATA_DIR / "traj_40000-steps_500.h5"
-DEFAULT_TEST_DATAPATH_PATH = DATA_DIR / "traj_2000-steps_500.h5"
+DEFAULT_DATASET_PATH = DATA_DIR / "traj_40000-steps_4000.h5"
+DEFAULT_TEST_DATAPATH_PATH = DATA_DIR / "traj_4000-steps_4000.h5"
 # ===========================
 # Checkpoint and Model Paths
 # ===========================
 
 CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
-DEFAULT_RESUME_CHECKPOINT = CHECKPOINT_DIR / "trajectory_dpf_foward:epoch=449_val_loss:val_loss=0.0340.ckpt"
+DEFAULT_RESUME_CHECKPOINT = CHECKPOINT_DIR / "trajectory_dpf_foward:epoch=629_val_loss:val_loss=0.0048.ckpt"
 
 # ===========================
 # Output Paths

@@ -61,7 +61,7 @@ from perceiver.model.core import (
     PerceiverDecoder,
     PerceiverEncoder,
 )
-from src.models.utils import EMA, visualize_trajectory, compare_generated_with_reconstructed, run_adam_optimization, run_langevin_dynamics
+from src.models.utils import EMA, visualize_trajectory, compare_generated_with_reconstructed
 from scripts.dataset import TrajectoryDPFCached
 from src import config
 from src.training.utils import compute_normalization_stats
@@ -86,6 +86,10 @@ class WandBTrajectoryCallback(pl.Callback):
         """Log sample trajectory after validation epoch."""
         current_epoch = trainer.current_epoch + 1
         
+        # Only log from the main process (rank 0) in DDP
+        if not trainer.is_global_zero:
+            return
+        
         print(f"\n[W&B Callback] on_validation_epoch_end called (epoch {current_epoch})")
         
         if not WANDB_AVAILABLE:
@@ -106,7 +110,7 @@ class WandBTrajectoryCallback(pl.Callback):
             # Generate sample trajectories (returns state, torque tuple)
             state, torque = pl_module.sample_trajectories(
                 num_samples=self.num_samples,
-                trajectory_length=min(500, pl_module.max_timesteps),
+                trajectory_length=min(1000, pl_module.max_timesteps),
                 num_diffusion_steps=100,
                 context_fraction=0.5,
                 use_ema=True,
@@ -128,8 +132,25 @@ class WandBTrajectoryCallback(pl.Callback):
             
             # Create temporary directory for the plot
             with tempfile.TemporaryDirectory() as tmp_dir:
-                visualize_trajectory(trajectory_dict, tmp_dir)
-                plot_path = os.path.join(tmp_dir, 'trajectory.jpg')
+                # Check if XML content is available for comparison plot
+                if pl_module.xml_content is not None:
+                    # Write XML to temp file for MuJoCo model loading
+                    xml_path = os.path.join(tmp_dir, 'model.xml')
+                    with open(xml_path, 'w') as f:
+                        f.write(pl_module.xml_content)
+                    
+                    # Use comparison plot (generated vs physics-reconstructed)
+                    compare_generated_with_reconstructed(
+                        trajectory_dict, xml_path, tmp_dir,
+                        dt=pl_module.dt, data_dt=pl_module.data_dt,
+                        name='comparison'
+                    )
+                    plot_path = os.path.join(tmp_dir, 'comparison.jpg')
+                else:
+                    # Fallback to simple visualization if XML not available
+                    print("[W&B] XML content not available, using simple visualization")
+                    visualize_trajectory(trajectory_dict, tmp_dir)
+                    plot_path = os.path.join(tmp_dir, 'trajectory.jpg')
                 
                 print(f"[W&B] Logging image from: {plot_path}")
                 wandb.log({
@@ -177,6 +198,10 @@ class TrajectoryDPF(pl.LightningModule):
         lr: float = 1e-4,
         use_ema: bool = True,
         p_uncond: float = 0.1,  # Probability of dropping conditioning for CFG
+        # Simulation metadata (loaded from dataset)
+        dt: float = 0.0001,  # Fine simulation timestep
+        data_dt: float = 0.00025,  # Data collection timestep
+        xml_content: Optional[str] = None,  # MuJoCo model XML content
         # Min-max normalization stats (optional, will be computed if not provided)
         qpos_min: Optional[torch.Tensor] = None,
         qpos_max: Optional[torch.Tensor] = None,
@@ -198,6 +223,12 @@ class TrajectoryDPF(pl.LightningModule):
         self.context_fraction_range = context_fraction_range
         self.lr = lr
         self.p_uncond = p_uncond  # CFG dropout probability
+        
+        # Simulation metadata for physics-consistent sampling
+        self.dt = dt
+        self.data_dt = data_dt
+        self.xml_content = xml_content
+        
         # Minimum allowed scale for any normalized dimension to avoid division blow-ups
         self.range_epsilon = config.DEFAULT_NORMALIZATION_RANGE_EPSILON
         
@@ -583,15 +614,15 @@ class TrajectoryDPF(pl.LightningModule):
         num_samples: int, 
         trajectory_length: int, 
         dt: float,
-        num_sin: int = 3,
-        lim_amplitude: float = 10.0,
-        lim_frequency: float = 1.0,
-        lim_phase: float = 100.0
+        num_sin: int = 5,
+        lim_amplitude: float = 0.5,
+        lim_frequency: float = 6 * math.pi,
+        lim_phase: float = 2 * math.pi
     ) -> torch.Tensor:
         """
         Generate random smooth torque sequences using sum of sinusoids.
         
-        Same approach as generate_dataset_forward.py.
+        Parameters match generate_dataset_forward.py for consistency.
         
         Returns:
             torque: [num_samples, trajectory_length, torque_dim]
@@ -934,7 +965,7 @@ def main():
     
     # Generation parameters
     parser.add_argument("--num_samples", type=int, default=config.DEFAULT_NUM_SAMPLES, help="Number of trajectories to generate")
-    parser.add_argument("--trajectory_length", type=int, default=500,
+    parser.add_argument("--trajectory_length", type=int, default=1000,
                         help="Length of generated trajectories (default: same as training trajectory length)")
     parser.add_argument("--output_path", type=str, default=config.DEFAULT_OUTPUT_PATH,
                         help="Output path for generated samples")
@@ -948,9 +979,9 @@ def main():
                         help="Whether to use EMA weights for sampling")
     
     # CFG and guidance parameters
-    parser.add_argument("--guidance_scale", type=float, default=1.0,
+    parser.add_argument("--guidance_scale", type=float, default=4.0,
                         help="Classifier-free guidance scale (1.0 = no CFG, >1.0 = stronger conditioning)")
-    parser.add_argument("--hnn_checkpoint", type=str, default='/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN-Tanh-epoch-epoch=459.ckpt',
+    parser.add_argument("--hnn_checkpoint", type=str, default='',
                         help="Path to HNN checkpoint for physics-based guidance during sampling")
     parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin"], default="adam",
                         help="HNN guidance method: 'adam' or 'langevin'")
@@ -1102,7 +1133,7 @@ def main():
     
     # Training mode - load dataset and setup training
     print(f"Loading dataset from {args.h5_path}...")
-    dataset = TrajectoryDPFCached(args.h5_path)
+    dataset = TrajectoryDPFCached(args.h5_path, trajectory_length=1000)
     
     # Get dimensions from first sample
     sample = dataset[0]
@@ -1111,10 +1142,17 @@ def main():
     torque_dim = sample['seq_torque'].shape[-1]
     max_timesteps = dataset.num_steps
     
+    # Get simulation metadata from dataset
+    dt = dataset.dt
+    data_dt = dataset.data_dt
+    xml_content = dataset.xml
+    
     print(f"Dataset info:")
     print(f"  Trajectories: {len(dataset)}")
     print(f"  Timesteps: {max_timesteps}")
     print(f"  qpos_dim: {qpos_dim}, mom_dim: {mom_dim}, torque_dim: {torque_dim}")
+    print(f"  dt: {dt}, data_dt: {data_dt}")
+    print(f"  XML content: {'loaded' if xml_content else 'not available'}")
     
     # Create dataloaders
     train_size = int(config.DEFAULT_TRAIN_VAL_SPLIT * len(dataset))
@@ -1188,6 +1226,9 @@ def main():
         num_latents=args.num_latents,
         num_latent_channels=args.num_latent_channels,
         lr=args.lr,
+        dt=dt,
+        data_dt=data_dt,
+        xml_content=xml_content,
         qpos_min=qpos_min,
         qpos_max=qpos_max,
         mom_min=mom_min,
@@ -1252,7 +1293,7 @@ def main():
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-        devices=1,
+        devices=[0],
         callbacks=callbacks,
         logger=logger,
         # gradient_clip_val=1.0,

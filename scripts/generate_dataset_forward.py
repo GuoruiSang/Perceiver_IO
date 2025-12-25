@@ -5,6 +5,7 @@ import concurrent.futures
 import h5py
 import os
 from tqdm import tqdm
+import math
 
 def randomly_initialize_qpos_qvel_qacc(model, lim_qpos=1, lim_qvel=1):
     """
@@ -28,52 +29,68 @@ def randomly_initialize_qpos_qvel_qacc(model, lim_qpos=1, lim_qvel=1):
 
     return initial_qpos, initial_qvel
 
-def generate_random_seq_torque(model, num_steps: int = 2000, num_sin: int = 20, lim_amplitude: int = 10, lim_frequency: int = 1, lim_phase: float = 3.14):
+def generate_random_seq_torque(model, num_steps: int = 2000, skip_steps: int = 1, num_sin: int = 20, lim_amplitude: int = 10, lim_frequency: int = 1, lim_phase: float = 3.14):
     """
-        Args: 
-            model:
-            num_steps:
-            num_sin:
-            lim_amplitude:
-            lim_frequency:
-            lim_phase:
+    Generate a smooth random torque sequence using sum of sinusoids.
+    
+    Args: 
+        model: MuJoCo model
+        num_steps: Number of data collection points (output length after subsampling)
+        skip_steps: Number of simulation steps between data collection points.
+                   Total simulation steps = num_steps * skip_steps
+        num_sin: Number of sinusoids to sum for each torque dimension
+        lim_amplitude: Maximum amplitude for sinusoids
+        lim_frequency: Maximum frequency for sinusoids
+        lim_phase: Maximum phase shift for sinusoids
 
-        Returns:
-
+    Returns:
+        seq_torque: (num_sim_steps, torque_dim) torque at fine simulation resolution
+                   where num_sim_steps = num_steps * skip_steps
     """
     torque_dim = model.nu
+    num_sim_steps = num_steps * skip_steps
 
     amplitudes = np.random.uniform(low=0, high=lim_amplitude, size=(torque_dim, num_sin, 1))
     frequencies = np.random.uniform(low=0, high=lim_frequency, size=(torque_dim, num_sin, 1))
     phases = np.random.uniform(low=0, high=lim_phase, size=(torque_dim, num_sin, 1))
 
-    # Create a steps array with shape (1, 1, num_steps) and broadcast to (torque_dim, num_sin, num_steps)
-    steps = np.arange(num_steps) * model.opt.timestep  # shape (num_steps,)
-    steps = steps[None, None, :]  # shape (1, 1, num_steps)
-    steps = np.tile(steps, (torque_dim, num_sin, 1))  # shape (torque_dim, num_sin, num_steps)
+    # Create a steps array with shape (1, 1, num_sim_steps) and broadcast to (torque_dim, num_sin, num_sim_steps)
+    # Time array at fine simulation resolution
+    steps = np.arange(num_sim_steps) * model.opt.timestep  # shape (num_sim_steps,)
+    steps = steps[None, None, :]  # shape (1, 1, num_sim_steps)
+    steps = np.tile(steps, (torque_dim, num_sin, 1))  # shape (torque_dim, num_sin, num_sim_steps)
     
     # Use sin functions to generate seq_torque
     seq_torque = np.sum(amplitudes * np.sin(frequencies * steps + phases), axis=1).T
-    # seq_torque = np.random.uniform(-10, 10, (num_steps, torque_dim))
-    # seq_torque = 0.1 * np.ones((num_steps, torque_dim))
     return seq_torque
 
-def generate_one_trajectory(model, initial_qpos, initial_qvel, seq_torque, num_steps: int = 2000, trim_length=10):
+def generate_one_trajectory(model, initial_qpos, initial_qvel, seq_torque, num_steps: int = 2000, skip_steps: int = 1, data_dt: float = None):
     """
-        Args:
-            model
-            initial_qpos
-            initial_qvel
-            seq_torque
-            num_steps
-        Returns:
-            seq_qpos
-            seq_qvel
-            seq_qacc
-            seq_mom
-            seq_mom_dot
+    Run forward dynamics simulation and collect data at specified intervals.
+    
+    Args:
+        model: MuJoCo model (with timestep already set to dt)
+        initial_qpos: Initial joint positions
+        initial_qvel: Initial joint velocities
+        seq_torque: Torque sequence at fine simulation resolution (num_sim_steps, torque_dim)
+                   where num_sim_steps = num_steps * skip_steps
+        num_steps: Number of data points to collect
+        skip_steps: Number of simulation steps between data collection points
+        data_dt: Data collection timestep (for computing derivatives). If None, uses model.opt.timestep * skip_steps
+        
+    Returns:
+        seq_qpos: (num_steps, nq) collected positions
+        seq_qvel: (num_steps, nv) collected velocities
+        seq_qacc: (num_steps, nv) collected accelerations
+        seq_mom: (num_steps, nv) collected momenta
+        seq_mom_dot: (num_steps, nv) time derivative of momentum
+        seq_energy: (num_steps,) total energy (kinetic + potential) at each timestep
     """
     data = mujoco.MjData(model)
+    
+    # Compute data_dt if not provided
+    if data_dt is None:
+        data_dt = model.opt.timestep * skip_steps
 
     # Reset data
     mujoco.mj_resetData(model, data)
@@ -83,68 +100,110 @@ def generate_one_trajectory(model, initial_qpos, initial_qvel, seq_torque, num_s
     data.qvel[:] = initial_qvel
 
     mujoco.mj_forward(model, data)
-    # Record the initial qpos, qvel, qacc, and momentum
-    # seq_qpos = [data.qpos]
-    # seq_qvel = [data.qvel]
-    # seq_qacc = [data.qacc]
 
-    seq_qpos = []
-    seq_qvel = []
-    seq_qacc = []
-
-    # Get initial mass matrix
-    M = np.zeros((model.nv, model.nv))
-    # mujoco.mj_fullM(model, M, data.qM)
-    # seq_mom = [M @ data.qvel]
-    seq_mom = []
-
-    # Run forward dynamics. 
-    # State 0 -> torque 0 -> State 1, ..., so if the length of seq_torque is N, then the number of states we'll record is N+1
-    for i in range(num_steps):
-        # Send a torque signal to the actuator
-        data.ctrl = seq_torque[i]
+    # Pre-allocate arrays for speed (avoid list appends and conversion)
+    nq, nv = model.nq, model.nv
+    seq_qpos = np.empty((num_steps, nq), dtype=np.float64)
+    seq_qvel = np.empty((num_steps, nv), dtype=np.float64)
+    seq_qacc = np.empty((num_steps, nv), dtype=np.float64)
+    seq_mom = np.empty((num_steps, nv), dtype=np.float64)
+    seq_energy = np.empty((num_steps,), dtype=np.float64)  # Total energy (KE + PE)
+    
+    # Pre-allocate mass matrix
+    M = np.zeros((nv, nv), dtype=np.float64)
+    
+    unstable = False
+    
+    # Nested loop: outer for data collection points, inner for simulation sub-steps
+    # This avoids modulo check every iteration
+    for data_idx in range(num_steps):
+        # Run skip_steps simulation steps
+        for sub_step in range(skip_steps):
+            sim_idx = data_idx * skip_steps + sub_step
+            data.ctrl[:] = seq_torque[sim_idx]
+            mujoco.mj_step(model, data)
         
-        # Run one step of dynamics
-        # Don't use mujoco.mj_forward, cause it only infer other related values, but doesn't integrate over the time
-        mujoco.mj_step(model, data)
-
-        # Record the states after applying control
-        seq_qpos.append(data.qpos.copy())
-        seq_qvel.append(data.qvel.copy())
-        seq_qacc.append(data.qacc.copy())
-
-        # Recompute the mass matrix, cause it changes
+        # Check stability only at collection points (not every sim step)
+        if np.any(np.isnan(data.qpos)) or np.any(np.abs(data.qvel) > 1e3):
+            # Fill remaining with NaNs
+            seq_qpos[data_idx:] = np.nan
+            seq_qvel[data_idx:] = np.nan
+            seq_qacc[data_idx:] = np.nan
+            seq_mom[data_idx:] = np.nan
+            seq_energy[data_idx:] = np.nan
+            unstable = True
+            break
+        
+        # Collect data (no condition check needed - always collect here)
+        seq_qpos[data_idx] = data.qpos
+        seq_qvel[data_idx] = data.qvel
+        seq_qacc[data_idx] = data.qacc
+        
+        # Compute mass matrix and momentum
         mujoco.mj_fullM(model, M, data.qM)
-        # Record the momentum
-        seq_mom.append(M @ data.qvel)
-
-
-    # Convert lists to np.array before returning
-    seq_qpos = np.array(seq_qpos)
-    seq_qvel = np.array(seq_qvel)
-    seq_qacc = np.array(seq_qacc)
-    seq_mom = np.array(seq_mom)
+        seq_mom[data_idx] = M @ data.qvel
+        
+        # Compute total energy: kinetic (data.energy[0]) + potential (data.energy[1])
+        seq_energy[data_idx] = data.energy[0] + data.energy[1]
 
     # Compute the derivative of momentum with respect to time using central difference
-    seq_mom_dot = np.zeros_like(seq_mom)
-    seq_mom_dot[1:-1] = (seq_mom[2:] - seq_mom[:-2]) / (2.0 * model.opt.timestep)
-    seq_mom_dot[0] = (-3*seq_mom[0] + 4*seq_mom[1] - seq_mom[2]) / (2.0*model.opt.timestep)
-    seq_mom_dot[-1] = (3*seq_mom[-1] - 4*seq_mom[-2] + seq_mom[-3]) / (2.0*model.opt.timestep)
+    # Note: Use data_dt (collection timestep) for derivative computation
+    seq_mom_dot = np.empty_like(seq_mom)
+    seq_mom_dot[1:-1] = (seq_mom[2:] - seq_mom[:-2]) / (2.0 * data_dt)
+    seq_mom_dot[0] = (-3*seq_mom[0] + 4*seq_mom[1] - seq_mom[2]) / (2.0 * data_dt)
+    seq_mom_dot[-1] = (3*seq_mom[-1] - 4*seq_mom[-2] + seq_mom[-3]) / (2.0 * data_dt)
         
-    return seq_qpos, seq_qvel, seq_qacc, seq_mom, seq_mom_dot
+    return seq_qpos, seq_qvel, seq_qacc, seq_mom, seq_mom_dot, seq_energy
 
-def generate(model, lim_qpos=0.5, lim_qvel=0.5, num_sin=1, lim_amplitude=10, lim_frequency=1, lim_phase=100, num_steps: int = 1000, use_torque=True):
+def generate(model, lim_qpos=math.pi/3, lim_qvel=math.pi/3, num_sin=5, lim_amplitude=0.5, lim_frequency=6*math.pi, lim_phase=2*math.pi, num_steps: int = 1000, skip_steps: int = 1, data_dt: float = None, use_torque=True):
+    """
+    Generate a single trajectory with random initial conditions and torque.
+    
+    Args:
+        model: MuJoCo model (with timestep already set to dt)
+        lim_qpos: Limit for random initial position sampling
+        lim_qvel: Limit for random initial velocity sampling
+        num_sin: Number of sinusoids for torque generation (default: 5 for smoother torques)
+        lim_amplitude: Maximum torque amplitude (default: 0.5 for bounded energy injection)
+        lim_frequency: Maximum torque frequency (default: 25 for more work cancellation)
+        lim_phase: Maximum torque phase
+        num_steps: Number of data points to collect
+        skip_steps: Number of simulation steps between data collection points
+        data_dt: Data collection timestep (for metadata). If None, uses model.opt.timestep * skip_steps
+        use_torque: Whether to apply random torque or zero torque
+        
+    Returns:
+        result: dict with seq_qpos, seq_qvel, seq_qacc, seq_mom, seq_mom_dot, seq_torque, seq_energy
+               All sequences have length num_steps (data collection points)
+               seq_torque is subsampled from fine resolution to match data collection
+    """
+    # Compute data_dt if not provided
+    if data_dt is None:
+        data_dt = model.opt.timestep * skip_steps
+        
     # Randomly sample initial position and velocity
     initial_qpos, initial_qvel = randomly_initialize_qpos_qvel_qacc(model, lim_qpos=lim_qpos, lim_qvel=lim_qvel)
-    # Randomly sample a smooth sequence of torque
+    
+    # Randomly sample a smooth sequence of torque at fine simulation resolution
+    num_sim_steps = num_steps * skip_steps
     if use_torque:
-        seq_torque = generate_random_seq_torque(model, num_steps=num_steps, num_sin=num_sin, lim_amplitude=lim_amplitude, lim_frequency=lim_frequency, lim_phase=lim_phase)
+        seq_torque_fine = generate_random_seq_torque(
+            model, num_steps=num_steps, skip_steps=skip_steps,
+            num_sin=num_sin, lim_amplitude=lim_amplitude, 
+            lim_frequency=lim_frequency, lim_phase=lim_phase
+        )
     else:
-        seq_torque = np.zeros((num_steps,model.nu))
+        seq_torque_fine = np.zeros((num_sim_steps, model.nu))
+    
     # Generate trajectories
-    seq_qpos, seq_qvel, seq_qacc, seq_mom, seq_mom_dot = generate_one_trajectory(
-        model, initial_qpos, initial_qvel, seq_torque, num_steps
+    seq_qpos, seq_qvel, seq_qacc, seq_mom, seq_mom_dot, seq_energy = generate_one_trajectory(
+        model, initial_qpos, initial_qvel, seq_torque_fine, 
+        num_steps=num_steps, skip_steps=skip_steps, data_dt=data_dt
     )
+    
+    # Subsample torque to match data collection points
+    # Take the torque at each data collection point (every skip_steps)
+    seq_torque = seq_torque_fine[skip_steps-1::skip_steps]  # Shape: (num_steps, torque_dim)
 
     result = {
         'seq_qpos': seq_qpos[:],
@@ -152,7 +211,8 @@ def generate(model, lim_qpos=0.5, lim_qvel=0.5, num_sin=1, lim_amplitude=10, lim
         'seq_qacc': seq_qacc[:],
         'seq_mom': seq_mom[:],
         'seq_mom_dot': seq_mom_dot[:],
-        'seq_torque': seq_torque[:]
+        'seq_torque': seq_torque[:],
+        'seq_energy': seq_energy[:]
     }
     return result
 
@@ -190,20 +250,35 @@ def generate_single_trajectory_task(args):
     """
     Worker function for multiprocessing.
     MuJoCo models cannot be pickled, so we load the model in each worker process.
+    
     Args:
-        args: Tuple of (xml_path, num_steps, seed)
+        args: Tuple of (xml_path, num_steps, dt, data_dt, seed, use_torque)
+              - xml_path: Path to MuJoCo XML model
+              - num_steps: Number of data points to collect
+              - dt: Fine simulation timestep
+              - data_dt: Data collection timestep (coarser)
+              - seed: Random seed for this trajectory
+              - use_torque: Whether to apply random torque
+              
     Returns:
         Result from generate() function
     """
-    xml_path, num_steps, dt, seed, use_torque = args
+    xml_path, num_steps, dt, data_dt, seed, use_torque = args
     # Set the seed for this process to ensure different trajectories
     np.random.seed(seed)
+    
+    # Compute skip_steps from timesteps
+    skip_steps = int(round(data_dt / dt))
+    if skip_steps < 1:
+        skip_steps = 1
     
     # Load model locally in each process (models can't be pickled)
     model = mujoco.MjModel.from_xml_path(xml_path)
     model.opt.timestep = dt
+    # Enable energy computation for energy-based filtering
+    model.opt.enableflags |= mujoco.mjtEnableBit.mjENBL_ENERGY
     
-    return generate(model, num_steps=num_steps, use_torque=use_torque)
+    return generate(model, num_steps=num_steps, skip_steps=skip_steps, data_dt=data_dt, use_torque=use_torque)
 
 def plot_coverage(results):
     nrows = results[0]['seq_qpos'].shape[1]
@@ -259,13 +334,13 @@ def plot_data(results):
 def show_statistics(results):
     """
     Concisely print statistics for the list of result dicts.
-    Each dict contains arrays for seq_qpos, seq_qvel, seq_qacc, seq_mom, seq_mom_dot, seq_torque.
+    Each dict contains arrays for seq_qpos, seq_qvel, seq_qacc, seq_mom, seq_mom_dot, seq_torque, seq_energy.
     """
     if not results:
         print("No results to compute statistics.")
         return
     
-    keys = ['seq_qpos', 'seq_qvel', 'seq_qacc', 'seq_mom', 'seq_mom_dot', 'seq_torque']
+    keys = ['seq_qpos', 'seq_qvel', 'seq_qacc', 'seq_mom', 'seq_mom_dot', 'seq_torque', 'seq_energy']
     stats = {}
     for key in keys:
         data = np.concatenate([r[key] for r in results], axis=0)
@@ -282,39 +357,78 @@ def show_statistics(results):
         print(f"{key}: shape={s['shape']}, min={s['min']:.4f}, max={s['max']:.4f}, mean={s['mean']:.4f}, std={s['std']:.4f}")
     print("--------------------")
 
-def is_available(result, lim_acc, lim_vel, lim_pos) -> bool:
+def is_available(result, lim_energy_ratio=10.0, max_energy_limit=1000.0, 
+                  max_velocity=50.0, max_acceleration=500.0) -> bool:
     """
-    Check if all timesteps of trajectory satisfy the provided limits.
+    Check if trajectory is stable using energy and kinematic filtering.
+    
     Args:
-        result: dict containing arrays for 'seq_qpos', 'seq_qvel', 'seq_qacc'
-        lim_acc: float/array, limit for acceleration (inclusive)
-        lim_vel: float/array, limit for velocity (inclusive)
-        lim_pos: float/array, limit for position (inclusive)
+        result: dict containing arrays for 'seq_qpos', 'seq_qvel', 'seq_qacc', 'seq_energy'
+        lim_energy_ratio: Maximum allowed ratio of max/initial energy
+        max_energy_limit: Hard limit on maximum energy value
+        max_velocity: Maximum allowed angular velocity (rad/s)
+        max_acceleration: Maximum allowed angular acceleration (rad/s²)
+        
     Returns:
-        bool: True if trajectory stays within specified limits, else False.
-        Additional default rule: The qpos of the second joint must be strictly less than pi/2 at all timesteps.
+        bool: True if trajectory is numerically stable and physically plausible, else False.
+        
+    Filtering criteria:
+        - NaN/Inf values (numerical instability)
+        - Gimbal lock avoidance for 3-hinge model
+        - Energy bounds (ratio and absolute)
+        - Kinematic bounds (velocity and acceleration)
     """
     seq_qpos = result['seq_qpos']    # shape: (num_steps, nq)
     seq_qvel = result['seq_qvel']    # shape: (num_steps, nv)
     seq_qacc = result['seq_qacc']    # shape: (num_steps, na)
+    seq_energy = result['seq_energy']  # shape: (num_steps,)
 
-    # Check abs(qacc) <= lim_acc everywhere
-    if np.any(np.abs(seq_qacc) > lim_acc):
+    # Check for NaNs or Infs (numerical instability)
+    if np.any(np.isnan(seq_qpos)) or np.any(np.isnan(seq_qvel)) or np.any(np.isnan(seq_qacc)):
         return False
-    # Check abs(qvel) <= lim_vel everywhere
-    if np.any(np.abs(seq_qvel) > lim_vel):
+    if np.any(np.isinf(seq_qpos)) or np.any(np.isinf(seq_qvel)) or np.any(np.isinf(seq_qacc)):
         return False
-    # Check abs(qpos) <= lim_pos everywhere
-    if np.any(np.abs(seq_qpos) > lim_pos):
+    if np.any(np.isnan(seq_energy)) or np.any(np.isinf(seq_energy)):
         return False
-    # By default, check if the qpos of the second joint (index 1) is strictly less than pi/2 at all timesteps
-    if seq_qpos.shape[1] >= 2:  # Only if there is a second joint
-        if np.any(seq_qpos[:, 1] >= (np.pi / 2)):
+    
+    # Kinematic limits (physically plausible dynamics)
+    if np.any(np.abs(seq_qvel) > max_velocity):
+        return False
+    if np.any(np.abs(seq_qacc) > max_acceleration):
+        return False
+    
+    # Check gimbal lock avoidance: qpos of second joint must be < pi/2
+    if seq_qpos.shape[1] >= 2:
+        if np.any(np.abs(seq_qpos[:, 1]) >= (np.pi / 2)):
             return False
+
+    # Energy-based filtering: check that energy doesn't grow unboundedly
+    initial_energy = np.abs(seq_energy[0]) + 1.0  # Add 1.0 to avoid division by zero
+    max_energy = np.max(np.abs(seq_energy))
+    energy_ratio = max_energy / initial_energy
+    
+    if energy_ratio > lim_energy_ratio:
+        return False
+    
+    # Hard limit on maximum energy
+    if max_energy > max_energy_limit:
+        return False
 
     return True
 
-def save_as_h5py(results, save_path, xml_path, num_steps, num_trajectories, dt):
+def save_as_h5py(results, save_path, xml_path, num_steps, num_trajectories, dt, data_dt):
+    """
+    Save trajectory results to HDF5 file.
+    
+    Args:
+        results: List of trajectory result dicts
+        save_path: Directory to save the file
+        xml_path: Path to MuJoCo XML model
+        num_steps: Number of data points per trajectory
+        num_trajectories: Number of trajectories
+        dt: Fine simulation timestep
+        data_dt: Data collection timestep
+    """
     # Create directory if it doesn't exist (including parent directories)
     # Don't use os.mkdir(), cause it only creates one level
     os.makedirs(save_path, exist_ok=True)
@@ -330,7 +444,9 @@ def save_as_h5py(results, save_path, xml_path, num_steps, num_trajectories, dt):
             file.attrs['xml'] = xml_file.read()
         file.attrs['num_steps'] = num_steps
         file.attrs['num_trajectories'] = num_trajectories
-        file.attrs['dt'] = dt
+        file.attrs['dt'] = dt              # Fine simulation timestep
+        file.attrs['data_dt'] = data_dt    # Data collection timestep
+        file.attrs['skip_steps'] = int(round(data_dt / dt))  # Number of sim steps between data points
 
         for i, result in tqdm(enumerate(results), total=len(results), desc='Saving'):
             group = file.create_group(f'traj_{i}')
@@ -340,6 +456,7 @@ def save_as_h5py(results, save_path, xml_path, num_steps, num_trajectories, dt):
             group.create_dataset('seq_mom', data=result['seq_mom'], dtype='f4')
             group.create_dataset('seq_mom_dot', data=result['seq_mom_dot'], dtype='f4')
             group.create_dataset('seq_torque', data=result['seq_torque'], dtype='f4')
+            group.create_dataset('seq_energy', data=result['seq_energy'], dtype='f4')
 
 
 def main():
@@ -348,13 +465,26 @@ def main():
     #------------------------------------------
     save_path = '/home/gsang/Projects/Perceiver_IO/data'
     xml_path = '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml'
-    num_steps = 2000
-    num_trajectories = 40000  # Target number of available trajectories
-    dt = 0.0005
-    batch_size = 1000  # Generate in batches for efficiency
+    num_steps = 4000          # Number of data points to collect per trajectory (reduced for stability)
+    num_trajectories = 40000   # Target number of available trajectories (increased for total data volume)
+    dt = 0.0001               # Fine simulation timestep (physics accuracy)
+    data_dt = 0.00025         # Data collection timestep (coarser, for dataset)
+    batch_size = 1000         # Generate in batches for efficiency
+    
+    # Compute skip_steps for display
+    skip_steps = int(round(data_dt / dt))
+    print(f"Configuration:")
+    print(f"  Simulation timestep (dt): {dt}")
+    print(f"  Data collection timestep (data_dt): {data_dt}")
+    print(f"  Skip steps: {skip_steps} (collect every {skip_steps} simulation steps)")
+    print(f"  Total simulation steps per trajectory: {num_steps * skip_steps}")
+    print(f"  Data points per trajectory: {num_steps}")
     
     # Filter limits
-    lim_acc, lim_vel, lim_pos = 50, 10, np.pi
+    lim_energy_ratio = 5.0  # Maximum allowed ratio of max/initial energy
+    max_energy_limit = 500.0  # Hard limit on maximum energy
+    max_velocity = 10.0  # Maximum angular velocity (rad/s)
+    max_acceleration = 100.0  # Maximum angular acceleration (rad/s²)
 
     use_torque = True
     available_results = []
@@ -366,16 +496,16 @@ def main():
     with concurrent.futures.ProcessPoolExecutor(max_workers=24) as executor:
         while len(available_results) < num_trajectories:
             # Generate batch of seeds
-            # seeds = np.arange(seed_counter, seed_counter + batch_size)
             seeds = np.random.randint(0, 99999, (batch_size,))
             seed_counter += batch_size
             
-            tasks = [(xml_path, num_steps, dt, seed, use_torque) for seed in seeds]
+            # Pass both dt and data_dt to worker tasks
+            tasks = [(xml_path, num_steps, dt, data_dt, seed, use_torque) for seed in seeds]
             results = list(executor.map(generate_single_trajectory_task, tasks))
             total_generated += len(results)
             
-            # Filter and accumulate
-            new_available = [r for r in results if is_available(r, lim_acc, lim_vel, lim_pos)]
+            # Filter and accumulate (energy + kinematic filtering)
+            new_available = [r for r in results if is_available(r, lim_energy_ratio, max_energy_limit, max_velocity, max_acceleration)]
             available_results.extend(new_available)
             
             # Update progress bar
@@ -389,7 +519,7 @@ def main():
     available_results = available_results[:num_trajectories]
     print(f"Collected {len(available_results)} trajectories (generated {total_generated}, accept rate: {len(available_results)/total_generated:.1%})")
     
-    save_as_h5py(available_results, save_path, xml_path, num_steps, num_trajectories, dt)
+    save_as_h5py(available_results, save_path, xml_path, num_steps, num_trajectories, dt, data_dt)
     print(f"All trajectories are saved as a h5py file to {save_path}")
     
 if __name__ == '__main__':
