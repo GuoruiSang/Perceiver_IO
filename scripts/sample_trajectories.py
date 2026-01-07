@@ -56,20 +56,21 @@ def main():
     
     print(f"Model configuration:")
     print(f"  qpos_dim: {model.qpos_dim}")
-    print(f"  qvel_dim: {model.qvel_dim}")
+    print(f"  mom_dim: {model.mom_dim}")
     print(f"  torque_dim: {model.torque_dim}")
     print(f"  diffusion_steps: {model.diffusion_steps}")
     print(f"  max_timesteps: {model.max_timesteps}")
     
     # Generate trajectories in batches
-    all_trajectories = []
+    all_states = []
+    all_torques = []
     num_batches = (args.num_samples + args.batch_size - 1) // args.batch_size
     
     for i in range(num_batches):
         batch_size = min(args.batch_size, args.num_samples - i * args.batch_size)
         print(f"\nGenerating batch {i+1}/{num_batches} ({batch_size} samples)...")
         
-        trajectories = model.sample_trajectories(
+        state, torque = model.sample_trajectories(
             num_samples=batch_size,
             trajectory_length=args.trajectory_length,
             num_diffusion_steps=args.num_diffusion_steps,
@@ -81,42 +82,42 @@ def main():
             guidance_steps=args.guidance_steps,
         )
         
-        all_trajectories.append(trajectories.cpu())
+        all_states.append(state.cpu())
+        all_torques.append(torque.cpu())
     
     # Concatenate all batches
-    all_trajectories = torch.cat(all_trajectories, dim=0)
+    all_states = torch.cat(all_states, dim=0)
+    all_torques = torch.cat(all_torques, dim=0)
     
     # Save to h5 file
     import h5py
     import numpy as np
     
-    trajectories_np = all_trajectories.numpy()
-    qpos = trajectories_np[:, :, :model.qpos_dim]
-    qvel = trajectories_np[:, :, model.qpos_dim:model.qpos_dim + model.qvel_dim]
-    torque = trajectories_np[:, :, model.qpos_dim + model.qvel_dim:]
+    qpos = all_states[:, :, :model.qpos_dim].numpy()
+    mom = all_states[:, :, model.qpos_dim:].numpy()
+    torque = all_torques.numpy()
     
     print(f"\nSaving to {args.output_path}...")
     os.makedirs(os.path.dirname(args.output_path) or '.', exist_ok=True)
     
     with h5py.File(args.output_path, 'w') as f:
-        episode = f.create_group("episode")
-        episode.create_dataset("qpos", data=qpos, dtype='f8')
-        episode.create_dataset("qvel", data=qvel, dtype='f8')
-        episode.create_dataset("torque", data=torque, dtype='f8')
+        f.attrs['num_trajectories'] = args.num_samples
+        f.attrs['num_steps'] = args.trajectory_length
         
-        # Store metadata
-        episode.attrs['description'] = 'Generated trajectories from Trajectory DPF'
-        episode.attrs['num_trajectories'] = args.num_samples
-        episode.attrs['trajectory_length'] = args.trajectory_length
-        episode.attrs['diffusion_steps'] = args.num_diffusion_steps
-        episode.attrs['context_fraction'] = args.context_fraction
-        episode.attrs['resample_context'] = args.resample_context
-        episode.attrs['checkpoint'] = args.checkpoint
+        for i in range(args.num_samples):
+            traj_group = f.create_group(f'traj_{i}')
+            traj_group.create_dataset('seq_qpos', data=qpos[i], dtype='f8')
+            traj_group.create_dataset('seq_mom', data=mom[i], dtype='f8')
+            traj_group.create_dataset('seq_torque', data=torque[i], dtype='f8')
+        
+        # Store metadata in root
+        f.attrs['description'] = 'Generated trajectories from Trajectory DPF'
+        f.attrs['checkpoint'] = args.checkpoint
     
     print(f"✓ Saved {args.num_samples} trajectories to {args.output_path}")
     print(f"\nDataset shape:")
     print(f"  qpos: {qpos.shape}")
-    print(f"  qvel: {qvel.shape}")
+    print(f"  mom: {mom.shape}")
     print(f"  torque: {torque.shape}")
 
 

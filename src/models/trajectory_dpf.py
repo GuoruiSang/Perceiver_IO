@@ -1,30 +1,3 @@
-"""
-Trajectory DPF: Diffusion Probabilistic Fields for Trajectory Generation
-
-Each timestep is a token with:
-- Value: (qpos, qvel, torque)
-- Diffusion timestep encoding (which denoising step: 1→1000)
-- Temporal position encoding (position in trajectory sequence: 0→T)
-
-Training & Sampling (consistent approach):
-- Query tokens: ALL timesteps with noised values
-- Context tokens: Random subset of queries (can overlap)
-- Predict noise for all queries using context subset
-- Loss computed on all query predictions
-
-Key insights:
-- Context provides conditioning, queries are where we predict
-- They don't need to be disjoint - overlap allows the model to learn
-  self-consistency and matches the sampling procedure
-- Temporal position encoding: Explicit Fourier encoding for each timestep's position
-  in the trajectory sequence, providing the model with temporal ordering information
-
-Sampling:
-- Start with all timesteps as pure noise
-- Iteratively denoise with random context/query splits using DDIM or DDPM Legacy
-- DDIM: Deterministic denoising for faster sampling
-- Save generated trajectories to h5 file
-"""
 
 import sys
 from pathlib import Path
@@ -66,7 +39,7 @@ from scripts.dataset import TrajectoryDPFCached
 from src import config
 from src.training.utils import compute_normalization_stats
 
-from src.models.architectures import TrajectoryOutputAdapter, TrajectoryPerceiverIO
+from src.models.architectures import TrajectoryOutputAdapter, TrajectoryPerceiverIO, ConditionedTrajectoryPerceiverIO
 import tempfile
 
 
@@ -175,9 +148,13 @@ class TrajectoryDPF(pl.LightningModule):
     
     Generates (qpos, mom) trajectories conditioned on torque using classifier-free guidance.
     
-    Token structure: [qpos | mom | torque_cond | diffusion_enc | temporal_enc]
+    Token structure: [qpos | mom | diffusion_enc | temporal_enc]
     - State (qpos, mom): noised and denoised
-    - Torque: clean conditioning (not noised)
+    - Torque: passed separately for per-step AdaLN conditioning (NOT in tokens)
+    
+    Per-step control mechanism (implements torque_t ⊗ state_t → state_{t+1}):
+    - Compute interaction embedding from (state_t, torque_t)
+    - Shift-right so it modulates state_{t+1} prediction
     
     Temporal information is encoded explicitly via Fourier position encodings:
     - Diffusion timestep: Which denoising step (1→diffusion_steps)
@@ -194,10 +171,13 @@ class TrajectoryDPF(pl.LightningModule):
         num_frequency_bands_for_diffusion: int = 64,
         num_latents: int = 256,
         num_latent_channels: int = 256,
+        cond_dim: int = 256,  # Dimension of conditioning embeddings
         context_fraction_range: Tuple[float, float] = (0.3, 0.7),
         lr: float = 1e-4,
         use_ema: bool = True,
         p_uncond: float = 0.1,  # Probability of dropping conditioning for CFG
+        lambda_cond: float = 0.1,  # Weight for conditioning regularization loss
+        encoder_cond_mode: str = "mean",  # "mean" or "none" for encoder global conditioning
         # Simulation metadata (loaded from dataset)
         dt: float = 0.0001,  # Fine simulation timestep
         data_dt: float = 0.00025,  # Data collection timestep
@@ -217,12 +197,14 @@ class TrajectoryDPF(pl.LightningModule):
         self.mom_dim = mom_dim
         self.torque_dim = torque_dim
         self.state_dim = qpos_dim + mom_dim  # State to denoise (qpos + mom)
-        self.cond_dim = torque_dim  # Conditioning dimension (torque)
+        self.adaln_cond_dim = cond_dim  # Conditioning embedding dimension for AdaLN
         self.max_timesteps = max_timesteps
         self.diffusion_steps = diffusion_steps
         self.context_fraction_range = context_fraction_range
         self.lr = lr
         self.p_uncond = p_uncond  # CFG dropout probability
+        self.lambda_cond = lambda_cond  # Conditioning regularization weight
+        self.encoder_cond_mode = encoder_cond_mode
         
         # Simulation metadata for physics-consistent sampling
         self.dt = dt
@@ -247,18 +229,21 @@ class TrajectoryDPF(pl.LightningModule):
         )
         self.temporal_encoding_channels = self.fpe_temporal.num_position_encoding_channels()
         
-        # Total input channels per token: state + conditioning + diffusion_enc + temporal_enc
-        # Token structure: [qpos | mom | torque_cond | diffusion_enc | temporal_enc]
-        # - state: qpos + mom (denoised)
-        # - torque_cond: conditioning (clean, not noised)
-        num_input_channels = self.state_dim + self.cond_dim + self.diffusion_encoding_channels + self.temporal_encoding_channels
+        # Total input channels per token: state + diffusion_enc + temporal_enc
+        # Token structure: [qpos | mom | diffusion_enc | temporal_enc]
+        # NOTE: Torque is NOT in tokens - it's passed separately for AdaLN conditioning
+        num_input_channels = self.state_dim + self.diffusion_encoding_channels + self.temporal_encoding_channels
         
-        # PerceiverIO backbone
-        self.model = TrajectoryPerceiverIO(
+        # PerceiverIO backbone with per-step state-torque interaction conditioning
+        self.model = ConditionedTrajectoryPerceiverIO(
             num_input_channels=num_input_channels,
             num_output_channels=self.state_dim,  # Predict noise for (qpos, mom) only
+            state_dim=self.state_dim,
+            torque_dim=torque_dim,
             num_latents=num_latents,
             num_latent_channels=num_latent_channels,
+            cond_dim=cond_dim,
+            encoder_cond_mode=encoder_cond_mode,
         )
         
         # Diffusion schedule (cosine)
@@ -374,28 +359,28 @@ class TrajectoryDPF(pl.LightningModule):
     def build_tokens(
         self, 
         state: torch.Tensor,
-        cond: torch.Tensor,
         diffusion_t: int, 
         skip_normalize: bool = False,
     ) -> torch.Tensor:
         """
-        Build tokens from state and conditioning with explicit temporal position encoding.
+        Build tokens from state with explicit temporal position encoding.
+        
+        NOTE: Torque is NOT included in tokens - it's passed separately to the model
+        for per-step AdaLN conditioning with state-torque interaction.
         
         Args:
             state: [B, T, state_dim] - batch of state trajectories (qpos, mom)
-            cond: [B, T, cond_dim] - batch of conditioning (torque)
             diffusion_t: diffusion timestep (1 to diffusion_steps)
             skip_normalize: if True, assumes inputs are already in normalized space
         
         Returns:
-            tokens: [B, T, C_in] where C_in = state + cond + diffusion_enc + temporal_enc
+            tokens: [B, T, C_in] where C_in = state + diffusion_enc + temporal_enc
         """
         B, T, _ = state.shape
         device = state.device
         
         # Normalize unless already in normalized space
         normalized_state = state if skip_normalize else self.normalize_state(state)
-        normalized_cond = cond if skip_normalize else self.normalize_cond(cond)
         
         # Diffusion timestep encoding (same for all timesteps)
         diffusion_enc = self.fpe_diffusion(B).to(device)[:, diffusion_t-1:diffusion_t, :]  # [B, 1, diff_enc_dim]
@@ -413,16 +398,17 @@ class TrajectoryDPF(pl.LightningModule):
         else:
             temporal_enc = self.fpe_temporal(B).to(device)[:, :T, :]  # [B, T, temp_enc_dim]
 
-        # Concatenate: [state | cond | diffusion_enc | temporal_enc]
-        tokens = torch.cat([normalized_state, normalized_cond, diffusion_enc, temporal_enc], dim=-1)
+        # Concatenate: [state | diffusion_enc | temporal_enc]
+        # NOTE: Torque is NOT included - passed separately for AdaLN conditioning
+        tokens = torch.cat([normalized_state, diffusion_enc, temporal_enc], dim=-1)
         
         return tokens
     
     def apply_noise(self, tokens: torch.Tensor, diffusion_t: int, return_noise: bool = False):
         """
-        Apply noise to the state part of tokens only (not conditioning).
+        Apply noise to the state part of tokens only.
         
-        Token structure: [state | cond | diffusion_enc | temporal_enc]
+        Token structure: [state | diffusion_enc | temporal_enc]
         Only state (positions 0 to state_dim) gets noised.
         
         Args:
@@ -443,7 +429,7 @@ class TrajectoryDPF(pl.LightningModule):
             self.sqrt_one_minus_alpha_cumprod[diffusion_t - 1] * noise
         )
         
-        # Replace state slice with noisy version (conditioning stays clean)
+        # Replace state slice with noisy version
         tokens = tokens.clone()
         tokens[:, :, state_start:state_end] = noisy_state
         
@@ -452,87 +438,84 @@ class TrajectoryDPF(pl.LightningModule):
         return tokens
     
     def training_step(self, batch, batch_idx):
-        """Training step with random context/query split and CFG dropout."""
+        """Training step with prefix context and CFG dropout."""
         # batch is a dict with keys: 'seq_qpos', 'seq_mom', 'seq_torque'
         qpos = batch['seq_qpos']  # [B, T, qpos_dim]
         mom = batch['seq_mom']    # [B, T, mom_dim]
         torque = batch['seq_torque']  # [B, T, torque_dim]
         
-        # State: [qpos | mom], Conditioning: torque
+        # State: [qpos | mom], Conditioning: torque (passed separately for AdaLN)
         state = torch.cat([qpos, mom], dim=-1)  # [B, T, state_dim]
         
         B, T, _ = state.shape
         
-        # CFG: randomly drop conditioning with probability p_uncond
-        if torch.rand(1).item() < self.p_uncond:
-            cond = torch.zeros_like(torque)  # Unconditional
-        else:
-            cond = torque  # Conditional
-        
         # Random diffusion timestep
         diffusion_t = torch.randint(1, self.diffusion_steps + 1, (1,)).item()
         
-        # Build tokens with state and conditioning
-        tokens = self.build_tokens(state, cond, diffusion_t)  # [B, T, C_in]
-        
-        # Random context/query split (following the sampling approach)
+        # PREFIX context selection (not random) for extension capability
         context_fraction = torch.empty(1).uniform_(*self.context_fraction_range).item()
-        num_context = max(1, min(T, int(T * context_fraction)))
+        num_context = max(1, min(T - 1, int(T * context_fraction)))
         
-        # All tokens are queries (same as during sampling)
-        queries = tokens  # [B, T, C_in]
+        # Build full token array once (NO torque in tokens), then apply noise once.
+        # IMPORTANT: keep contexts as a slice of the (noisy) queries so training matches sampling
+        tokens = self.build_tokens(state, diffusion_t)  # [B, T, C_in]
+        noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)  # noise on state slice only
+
+        noisy_queries = noisy_tokens
+        noisy_contexts = noisy_tokens[:, :num_context, :]
         
-        # Context is a random subset of queries (can overlap with loss computation)
-        ctx_idx = torch.stack([torch.randperm(T, device=tokens.device)[:num_context] 
-                               for _ in range(B)], dim=0)
-        contexts = torch.gather(tokens, 1, ctx_idx.unsqueeze(-1).expand(-1, -1, tokens.shape[-1]))
+        # Normalize torque for conditioning (passed separately to model)
+        torque_norm = self.normalize_cond(torque)
         
-        # Apply noise to both context and query (only state part is noised)
-        noisy_contexts = self.apply_noise(contexts, diffusion_t)
-        noisy_queries, noise = self.apply_noise(queries, diffusion_t, return_noise=True)
+        # ========== CFG DROPOUT (classifier-free guidance training) ==========
+        # With probability p_uncond, train unconditionally by zeroing torque
+        if torch.rand(1).item() < self.p_uncond:
+            torque_norm = torch.zeros_like(torque_norm)
+
+        # Predict noise (torque passed separately for per-step AdaLN conditioning)
+        predictions = self.model(noisy_contexts, noisy_queries, torque_norm)
+            
+        # Main loss: predict noise
+        loss_denoise = F.mse_loss(predictions, noise)
         
-        # Predict noise for queries
-        predictions = self.model(noisy_contexts, noisy_queries)
-        
-        # Loss: predict noise only for state part
-        loss = F.mse_loss(predictions, noise)
+        loss = loss_denoise
         
         # Log training loss (step-level only)
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('denoise_loss', loss_denoise, prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
         
         return loss
     
     def validation_step(self, batch, batch_idx):
-        """Validation step (always conditional, no CFG dropout)."""
+        """Validation step with prefix context (always conditional, no CFG dropout)."""
         qpos = batch['seq_qpos']
         mom = batch['seq_mom']
         torque = batch['seq_torque']
         
-        # State: [qpos | mom], Conditioning: torque
+        # State: [qpos | mom], Conditioning: torque (passed separately for AdaLN)
         state = torch.cat([qpos, mom], dim=-1)
-        cond = torque  # Always conditional for validation
         
         B, T, _ = state.shape
         
         diffusion_t = torch.randint(1, self.diffusion_steps + 1, (1,)).item()
-        tokens = self.build_tokens(state, cond, diffusion_t)
         
-        # Use fixed context fraction for validation (matching sampling approach)
+        # Build tokens (NO torque in tokens)
+        tokens = self.build_tokens(state, diffusion_t)
+        
+        # Use fixed context fraction for validation - PREFIX context
         context_fraction = 0.5
-        num_context = max(1, min(T, int(T * context_fraction)))
+        num_context = max(1, min(T - 1, int(T * context_fraction)))
         
-        # All tokens are queries (same as training and sampling)
-        queries = tokens  # [B, T, C_in]
+        # Apply noise once, then slice PREFIX context from the same noisy token array.
+        noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+        noisy_queries = noisy_tokens  # [B, T, C_in]
+        noisy_contexts = noisy_tokens[:, :num_context, :]  # [B, num_context, C_in]
         
-        # Context is a random subset of queries
-        ctx_idx = torch.stack([torch.randperm(T, device=tokens.device)[:num_context] 
-                               for _ in range(B)], dim=0)
-        contexts = torch.gather(tokens, 1, ctx_idx.unsqueeze(-1).expand(-1, -1, tokens.shape[-1]))
+        # Normalize torque for conditioning (passed separately)
+        torque_norm = self.normalize_cond(torque)
         
-        noisy_contexts = self.apply_noise(contexts, diffusion_t)
-        noisy_queries, noise = self.apply_noise(queries, diffusion_t, return_noise=True)
-        
-        predictions = self.model(noisy_contexts, noisy_queries)
+        # Predict noise (torque passed separately for per-step AdaLN conditioning)
+        predictions = self.model(noisy_contexts, noisy_queries, torque_norm)
         loss = F.mse_loss(predictions, noise)
         
         # Log validation loss (epoch-level only)
@@ -667,7 +650,7 @@ class TrajectoryDPF(pl.LightningModule):
         langevin_step_size: float = 1e-5,
         langevin_noise_scale: float = 1e-6,
         lambda_init: float = 1.0,  # Weight for initial consistency term
-        dt: float = 0.0005,
+        dt: Optional[float] = None,
         # Torque generation parameters
         torque: torch.Tensor = None,  # Optional: provide torque directly
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -694,7 +677,8 @@ class TrajectoryDPF(pl.LightningModule):
             langevin_step_size: step size for langevin guidance
             langevin_noise_scale: noise scale for langevin guidance
             lambda_init: weight for initial consistency term in HNN energy
-            dt: timestep for physics consistency
+            dt: timestep used to parameterize random torque generation (seconds between torque samples).
+                If None, defaults to self.data_dt (dataset control timestep).
             torque: optional pre-generated torque [num_samples, trajectory_length, torque_dim]
         
         Returns:
@@ -709,9 +693,17 @@ class TrajectoryDPF(pl.LightningModule):
         # Use EMA weights if available
         if use_ema and self.ema is not None:
             print(f"[Sampling] Applying EMA weights for inference...")
+            
+            # CRITICAL: Ensure EMA shadow tensors are on the same device as the model
+            # This is necessary because EMA is not an nn.Module and doesn't follow model.to(device)
+            device = next(self.model.parameters()).device
+            for name, param in self.model.named_parameters():
+                if param.requires_grad and name in self.ema.shadow:
+                    self.ema.shadow[name] = self.ema.shadow[name].to(device=device, dtype=param.dtype)
+            
             self.ema.store(self.model)
             self.ema.copy_to(self.model)
-            print(f"[Sampling] ✓ EMA weights applied to model")
+            print(f"[Sampling] ✓ EMA weights applied to model (device: {device})")
         elif use_ema and self.ema is None:
             print(f"[Sampling] WARNING: use_ema=True but no EMA available!")
         else:
@@ -721,17 +713,19 @@ class TrajectoryDPF(pl.LightningModule):
         
         # Generate or use provided torque conditioning
         if torque is None:
+            # NOTE: use dataset control timestep by default so sampling torque matches training distribution
+            torque_dt = float(self.data_dt) if dt is None else float(dt)
             print(f"[Sampling] Generating random torque sequences...")
-            torque = self._generate_random_torque(num_samples, trajectory_length, dt)
+            torque = self._generate_random_torque(num_samples, trajectory_length, torque_dt)
         else:
             torque = torque.to(device)
         
         # Start with pure noise for state (qpos, mom)
         x = torch.randn(num_samples, trajectory_length, self.state_dim, device=device)
         
-        # Normalized conditioning
+        # Normalized conditioning (torque passed separately for AdaLN)
         cond = self.normalize_cond(torque)
-        cond_uncond = torch.zeros_like(cond)  # Unconditional: zeros
+        cond_uncond = torch.zeros_like(cond)  # Unconditional: zeros (for CFG)
         
         # Setup timesteps based on sampler
         if sampler == "ddpm":
@@ -754,40 +748,44 @@ class TrajectoryDPF(pl.LightningModule):
         
         print(f"[Sampling] CFG guidance_scale={guidance_scale}")
         
-        num_context = max(1, min(trajectory_length, int(trajectory_length * context_fraction)))
-        
-        if not resample_context_every_step:
-            ctx_idx = torch.stack([torch.randperm(trajectory_length, device=device)[:num_context] 
-                                   for _ in range(num_samples)], dim=0)
+        # PREFIX context: use first num_context timesteps (not random)
+        num_context = max(1, min(trajectory_length - 1, int(trajectory_length * context_fraction)))
 
         for i, t in enumerate(tqdm(ts, total=len(ts), desc="Sampling")):
             t_int = int(t.item())
             
-            # Build tokens for conditional and unconditional
-            queries_cond = self.build_tokens(x, cond, t_int + 1, skip_normalize=True)
+            # Build tokens (NO torque in tokens): [state | diffusion_enc | temporal_enc]
+            queries = self.build_tokens(x, t_int + 1, skip_normalize=True)
             
-            if resample_context_every_step:
-                ctx_idx = torch.stack([torch.randperm(trajectory_length, device=device)[:num_context]
-                                       for _ in range(num_samples)], dim=0)
+            # PREFIX context: first num_context timesteps
+            contexts = queries[:, :num_context, :]
             
-            contexts_cond = torch.gather(queries_cond, 1, ctx_idx.unsqueeze(-1).expand(-1, -1, queries_cond.shape[-1]))
-            
-            # Predict noise conditionally
+            # Predict noise conditionally (torque passed separately for per-step AdaLN)
             with torch.no_grad():
-                eps_cond = self.model(contexts_cond, queries_cond)
+                eps_cond = self.model(contexts, queries, cond)
             
             # CFG: if guidance_scale != 1.0, also predict unconditionally
             if guidance_scale != 1.0:
-                queries_uncond = self.build_tokens(x, cond_uncond, t_int + 1, skip_normalize=True)
-                contexts_uncond = torch.gather(queries_uncond, 1, ctx_idx.unsqueeze(-1).expand(-1, -1, queries_uncond.shape[-1]))
-                
+                # Predict with zeroed torque for unconditional
                 with torch.no_grad():
-                    eps_uncond = self.model(contexts_uncond, queries_uncond)
+                    eps_uncond = self.model(contexts, queries, cond_uncond)
                 
                 # CFG combination
                 eps = eps_uncond + guidance_scale * (eps_cond - eps_uncond)
+                
+                # DEBUG: Print diagnostic info at key steps
+                if i in [0, len(ts)//2, len(ts)-1]:
+                    eps_diff = (eps_cond - eps_uncond).abs().mean().item()
+                    print(f"[DEBUG] Step {i}, t={t_int}: eps_cond range=[{eps_cond.min():.4f}, {eps_cond.max():.4f}], "
+                          f"eps_uncond range=[{eps_uncond.min():.4f}, {eps_uncond.max():.4f}], "
+                          f"|eps_cond - eps_uncond| mean={eps_diff:.6f}")
             else:
                 eps = eps_cond
+                
+                # DEBUG: Print diagnostic info at key steps  
+                if i in [0, len(ts)//2, len(ts)-1]:
+                    print(f"[DEBUG] Step {i}, t={t_int}: eps range=[{eps.min():.4f}, {eps.max():.4f}], "
+                          f"eps mean={eps.mean():.4f}, eps std={eps.std():.4f}")
             
             # Extract current state
             x_t = x  # Already just the state part (not in tokens)
@@ -821,8 +819,21 @@ class TrajectoryDPF(pl.LightningModule):
             elif sampler == "ddim":
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
                 
+                # DEBUG: Check x0 temporal variation at key steps
+                if i in [0, len(ts)//2, len(ts)-1]:
+                    # Check if x0 varies across time (dim 1) - should NOT be constant
+                    x0_time_std = x0.std(dim=1).mean().item()  # Std across timesteps, averaged over batch and dims
+                    x0_dim_std = x0.std(dim=2).mean().item()   # Std across state dims
+                    print(f"[DEBUG] Step {i}: x0 temporal_std={x0_time_std:.6f}, dim_std={x0_dim_std:.6f}, "
+                          f"x0 range=[{x0.min():.4f}, {x0.max():.4f}]")
+                
                 # Apply HNN-based guidance
                 if hnn is not None and guidance_steps > 0 and i >= guidance_after_steps:
+                    # IMPORTANT:
+                    # x0 lives in "normalized state space" (intended ~[-1, 1]) but can exceed that range.
+                    # If we denormalize an unclamped x0, we can push qpos/mom far outside the training
+                    # distribution, which explodes finite differences and HNN physics energy.
+                    x0 = torch.clamp(x0, -1.0, 1.0)
                     x0_phys = self.denormalize_state(x0)
                     seq_qpos = x0_phys[:, :, :self.qpos_dim]
                     seq_mom = x0_phys[:, :, self.qpos_dim:]
@@ -830,12 +841,12 @@ class TrajectoryDPF(pl.LightningModule):
                     if guidance_method == "adam":
                         x0_phys = run_adam_optimization_hnn(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
-                            dt, hnn, guidance_steps, guidance_lr, lambda_init=lambda_init
+                            self.data_dt, hnn, guidance_steps, guidance_lr, lambda_init=lambda_init
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
-                            dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale, lambda_init=lambda_init
+                            self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale, lambda_init=lambda_init
                         )
                     x0 = self.normalize_state(x0_phys).detach()
                 
@@ -847,17 +858,18 @@ class TrajectoryDPF(pl.LightningModule):
                 
                 # Apply HNN-based guidance
                 if hnn is not None and guidance_steps > 0 and i >= guidance_after_steps:
+                    x0 = torch.clamp(x0, -1.0, 1.0)
                     x0_phys = self.denormalize_state(x0)
                     
                     if guidance_method == "adam":
                         x0_phys = run_adam_optimization_hnn(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
-                            dt, hnn, guidance_steps, guidance_lr, lambda_init=lambda_init
+                            self.data_dt, hnn, guidance_steps, guidance_lr, lambda_init=lambda_init
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
-                            dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale, lambda_init=lambda_init
+                            self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale, lambda_init=lambda_init
                         )
                     x0 = self.normalize_state(x0_phys).detach()
                 
@@ -981,11 +993,11 @@ def main():
     # CFG and guidance parameters
     parser.add_argument("--guidance_scale", type=float, default=4.0,
                         help="Classifier-free guidance scale (1.0 = no CFG, >1.0 = stronger conditioning)")
-    parser.add_argument("--hnn_checkpoint", type=str, default='',
+    parser.add_argument("--hnn_checkpoint", type=str, default='/home/gsang/Projects/Perceiver_IO/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt',
                         help="Path to HNN checkpoint for physics-based guidance during sampling")
     parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin"], default="adam",
                         help="HNN guidance method: 'adam' or 'langevin'")
-    parser.add_argument("--guidance_after_steps", type=int, default=0,
+    parser.add_argument("--guidance_after_steps", type=int, default=50,
                         help="Start HNN guidance after this many diffusion steps (0 = from beginning)")
     parser.add_argument("--guidance_steps", type=int, default=0,
                         help="Number of HNN optimization steps per diffusion step (0 = disabled)")
@@ -997,7 +1009,7 @@ def main():
                         help="Noise scale for langevin HNN guidance")
     parser.add_argument("--lambda_init", type=float, default=1.0,
                         help="Weight for initial consistency term in HNN energy")
-    parser.add_argument("--seed", type=int, default=13,
+    parser.add_argument("--seed", type=int, default=21,
                         help="Random seed for reproducible sampling")
     
     # W&B arguments
@@ -1052,17 +1064,15 @@ def main():
         # Load HNN for guidance
         hnn = None
         if args.hnn_checkpoint and args.guidance_steps > 0:
-            from src.models.HNN import HNN
+            from src.models.HNN import HNNWrapper
             print(f"[Sampling] Loading HNN from: {args.hnn_checkpoint}")
-            hnn_ckpt = torch.load(args.hnn_checkpoint, map_location=device)
             
-            # Load HNN for energy-based consistency
-            hnn_state = {k.replace('model.', ''): v 
-                         for k, v in hnn_ckpt['state_dict'].items() if k.startswith('model.')}
-            hnn = HNN(coordinate_dim=model.qpos_dim, momenta_dim=model.mom_dim).to(device)
-            hnn.load_state_dict(hnn_state)
+            # Load HNNWrapper (includes input scaling q_std, p_std)
+            hnn = HNNWrapper.load_from_checkpoint(args.hnn_checkpoint, map_location=device)
+            hnn = hnn.to(device)
             hnn.eval()
-            print(f"[Sampling] ✓ HNN loaded for energy consistency")
+            print(f"[Sampling] ✓ HNNWrapper loaded for energy consistency")
+            print(f"[Sampling]   Scaling: q_std={hnn.q_std.mean().item():.4f}, p_std={hnn.p_std.mean().item():.4f}")
         
         # Determine trajectory length (default to training length if not specified)
         trajectory_length = args.trajectory_length if args.trajectory_length is not None else model.max_timesteps
@@ -1111,7 +1121,10 @@ def main():
         }
         compare_generated_with_reconstructed(
             generated, '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml',
-            '/home/gsang/Projects/Perceiver_IO/plots'
+            '/home/gsang/Projects/Perceiver_IO/plots',
+            dt=float(model.dt),
+            data_dt=float(model.data_dt),
+            name='comparison'
         )
         
         # Save to h5
@@ -1216,7 +1229,7 @@ def main():
     print(f"[Visualization] Original state range: [{full_state.min():.4f}, {full_state.max():.4f}]")
     print(f"[Visualization] Normalized state range: [{normalized_state.min():.4f}, {normalized_state.max():.4f}]")
 
-    # Create model
+    # Create model (per-step state-torque interaction conditioning, prefix context)
     model = TrajectoryDPF(
         qpos_dim=qpos_dim,
         mom_dim=mom_dim,
@@ -1225,7 +1238,9 @@ def main():
         diffusion_steps=args.diffusion_steps,
         num_latents=args.num_latents,
         num_latent_channels=args.num_latent_channels,
+        cond_dim=256,  # AdaLN conditioning embedding dimension
         lr=args.lr,
+        encoder_cond_mode="mean",  # Global encoder conditioning: "mean" or "none"
         dt=dt,
         data_dt=data_dt,
         xml_content=xml_content,
@@ -1276,7 +1291,7 @@ def main():
     
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename='trajectory_dpf_foward:{epoch:03d}_val_loss:{val_loss:.4f}',
+        filename='trajectory_dpf_PerStepInteraction:{epoch:03d}_val_loss:{val_loss:.4f}',
         every_n_epochs=10,  # Save checkpoint every 10 epochs
     )
     callbacks.append(checkpoint_callback)
@@ -1293,7 +1308,7 @@ def main():
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-        devices=[0],
+        devices=[0,1],
         callbacks=callbacks,
         logger=logger,
         # gradient_clip_val=1.0,
