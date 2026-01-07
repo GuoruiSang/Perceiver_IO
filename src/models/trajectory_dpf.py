@@ -576,10 +576,60 @@ class TrajectoryDPF(pl.LightningModule):
         if self.ema is not None:
             self.ema.update(self.model)
     
-    def _predict_x0(self, x_t: torch.Tensor, eps: torch.Tensor, a_bar_t: torch.Tensor) -> torch.Tensor:
-        """Predict x0 from noisy state x_t and predicted noise eps."""
+    def _predict_x0(
+        self, 
+        x_t: torch.Tensor, 
+        eps: torch.Tensor, 
+        a_bar_t: torch.Tensor,
+        dynamic_threshold: bool = True,
+        percentile: float = 0.995,
+        clamp_range: float = 1.0,
+    ) -> torch.Tensor:
+        """
+        Predict x0 from noisy state x_t and predicted noise eps, with stabilization.
+        
+        Uses dynamic thresholding (Imagen-style) to prevent CFG blow-up:
+        1. Compute raw x0 prediction
+        2. Find the percentile threshold of |x0| across all dimensions
+        3. If threshold > clamp_range, scale x0 so the percentile lands at clamp_range
+        4. Finally clamp to [-clamp_range, clamp_range]
+        
+        This keeps x0 in a reasonable range without hard clipping artifacts.
+        
+        Args:
+            x_t: [B, T, state_dim] - noisy state
+            eps: [B, T, state_dim] - predicted noise
+            a_bar_t: scalar - cumulative alpha at timestep t
+            dynamic_threshold: whether to use dynamic thresholding (vs hard clamp)
+            percentile: percentile for dynamic threshold (0.995 = 99.5th percentile)
+            clamp_range: target range for normalized data (typically 1.0 for [-1,1])
+        
+        Returns:
+            x0: [B, T, state_dim] - stabilized x0 prediction
+        """
+        # Raw x0 prediction
         x0 = (x_t - torch.sqrt(1.0 - a_bar_t) * eps) / torch.sqrt(a_bar_t)
-        # return torch.clamp(x0, -10, 10)
+        
+        if dynamic_threshold:
+            # Compute percentile threshold per sample (flatten T and state_dim)
+            B = x0.shape[0]
+            x0_flat = x0.reshape(B, -1).abs()  # [B, T*state_dim]
+            
+            # Get the percentile value for each sample
+            k = int(percentile * x0_flat.shape[1])
+            k = max(1, min(k, x0_flat.shape[1] - 1))
+            threshold = x0_flat.kthvalue(k, dim=1, keepdim=True).values  # [B, 1]
+            
+            # Scale down if threshold exceeds clamp_range
+            threshold = torch.clamp(threshold, min=clamp_range)  # At least clamp_range
+            scale = clamp_range / threshold  # [B, 1]
+            scale = scale.unsqueeze(-1)  # [B, 1, 1] for broadcasting
+            
+            x0 = x0 * scale
+        
+        # Final hard clamp as safety net
+        x0 = torch.clamp(x0, -clamp_range, clamp_range)
+        
         return x0
     
     def _compute_legacy_sigma_t(

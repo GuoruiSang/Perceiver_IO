@@ -251,22 +251,29 @@ class AdaLNSelfAttentionBlock(nn.Module):
 
 class AdaLNCrossAttentionBlock(nn.Module):
     """
-    Cross-attention block with AdaLN-Zero conditioning.
+    Cross-attention block with STATE-ONLY AdaLN-Zero conditioning.
     
-    Queries attend to latents (key-value), with per-timestep torque modulation on queries.
+    Queries attend to latents (key-value), with per-timestep torque modulation 
+    applied ONLY to the state portion of queries. Diffusion and temporal encodings
+    are left untouched to preserve temporal coherence.
+    
+    Token structure: [state | diffusion_enc | temporal_enc]
+    AdaLN modulates: [state] only
     """
     
     def __init__(
         self, 
         query_dim: int, 
         latent_dim: int, 
-        cond_dim: int, 
+        cond_dim: int,
+        state_dim: int,  # NEW: dimension of state slice to modulate
         num_heads: int = 8, 
         dropout: float = 0.0
     ):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = query_dim // num_heads
+        self.state_dim = state_dim  # Only modulate this portion
         assert query_dim % num_heads == 0, f"query_dim {query_dim} must be divisible by num_heads {num_heads}"
         
         self.norm_q = nn.LayerNorm(query_dim, elementwise_affine=False)
@@ -277,11 +284,11 @@ class AdaLNCrossAttentionBlock(nn.Module):
         self.out_proj = nn.Linear(query_dim, query_dim)
         self.attn_dropout = nn.Dropout(dropout)
         
-        # AdaLN-Zero for query modulation: 2 vectors (scale, shift) for cross-attention
-        # No gate for cross-attention (always attend to latents)
+        # AdaLN-Zero for STATE-ONLY modulation: only modulate state_dim channels
+        # Output scale/shift for state portion only
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
-            nn.Linear(cond_dim, query_dim * 2),
+            nn.Linear(cond_dim, state_dim * 2),  # Only state_dim, not query_dim
         )
         nn.init.zeros_(self.adaLN_modulation[-1].weight)
         nn.init.zeros_(self.adaLN_modulation[-1].bias)
@@ -294,7 +301,7 @@ class AdaLNCrossAttentionBlock(nn.Module):
     ) -> torch.Tensor:
         """
         Args:
-            queries: [B, T, query_dim] - query tokens (state + positional encodings)
+            queries: [B, T, query_dim] - query tokens [state | diffusion_enc | temporal_enc]
             latents: [B, N, latent_dim] - latent array from encoder
             cond: [B, T, cond_dim] - per-timestep conditioning
         Returns:
@@ -303,12 +310,25 @@ class AdaLNCrossAttentionBlock(nn.Module):
         B, T, C = queries.shape
         N = latents.shape[1]
         
-        # Get per-timestep modulation parameters
-        mod = self.adaLN_modulation(cond)  # [B, T, query_dim*2]
-        shift, scale = mod.chunk(2, dim=-1)
+        # Get per-timestep modulation parameters (for state slice only)
+        mod = self.adaLN_modulation(cond)  # [B, T, state_dim*2]
+        shift, scale = mod.chunk(2, dim=-1)  # Each: [B, T, state_dim]
         
-        # Cross-attention: modulated queries attend to latents
-        q = self.q_proj(self.norm_q(queries) * (1 + scale) + shift)
+        # STATE-ONLY AdaLN: modulate only the state portion, leave encodings untouched
+        queries_normed = self.norm_q(queries)  # [B, T, query_dim]
+        
+        # Split into state and encoding portions
+        state_normed = queries_normed[:, :, :self.state_dim]  # [B, T, state_dim]
+        enc_normed = queries_normed[:, :, self.state_dim:]    # [B, T, query_dim - state_dim]
+        
+        # Apply AdaLN only to state portion
+        state_modulated = state_normed * (1 + scale) + shift  # [B, T, state_dim]
+        
+        # Recombine: modulated state + untouched encodings
+        queries_modulated = torch.cat([state_modulated, enc_normed], dim=-1)  # [B, T, query_dim]
+        
+        # Cross-attention with partially modulated queries
+        q = self.q_proj(queries_modulated)
         kv = self.kv_proj(self.norm_kv(latents))
         k, v = kv.chunk(2, dim=-1)
         
@@ -400,10 +420,11 @@ class ConditionedPerceiverEncoder(nn.Module):
 
 class ConditionedPerceiverDecoder(nn.Module):
     """
-    PerceiverIO decoder with AdaLN-conditioned cross-attention.
+    PerceiverIO decoder with STATE-ONLY AdaLN-conditioned cross-attention.
     
     Architecture:
     1. Cross-attention: queries attend to latents with per-timestep torque modulation (AdaLN)
+       - AdaLN only modulates state portion, leaving diffusion/temporal encodings untouched
     2. Output projection to state dimensions
     """
     
@@ -412,17 +433,19 @@ class ConditionedPerceiverDecoder(nn.Module):
         num_query_channels: int,
         num_latent_channels: int,
         num_output_channels: int,
+        state_dim: int,  # NEW: dimension of state slice for state-only AdaLN
         cond_dim: int = 256,
         num_heads: int = 8,
         dropout: float = 0.0,
     ):
         super().__init__()
         
-        # Cross-attention with AdaLN conditioning
+        # Cross-attention with STATE-ONLY AdaLN conditioning
         self.cross_attn = AdaLNCrossAttentionBlock(
             query_dim=num_query_channels,
             latent_dim=num_latent_channels,
             cond_dim=cond_dim,
+            state_dim=state_dim,  # Pass state_dim for state-only modulation
             num_heads=num_heads,
             dropout=dropout,
         )
@@ -506,7 +529,7 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         
         # Global conditioning projection (for encoder, if enabled)
         if encoder_cond_mode != "none":
-        self.global_cond_proj = nn.Linear(cond_dim, cond_dim)
+            self.global_cond_proj = nn.Linear(cond_dim, cond_dim)
         else:
             self.global_cond_proj = None
         
@@ -521,11 +544,12 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
             dropout=dropout,
         )
         
-        # Conditioned decoder
+        # Conditioned decoder with STATE-ONLY AdaLN
         self.decoder = ConditionedPerceiverDecoder(
             num_query_channels=num_input_channels,
             num_latent_channels=num_latent_channels,
             num_output_channels=num_output_channels,
+            state_dim=state_dim,  # Pass state_dim for state-only AdaLN modulation
             cond_dim=cond_dim,
             num_heads=num_heads,
             dropout=dropout,
