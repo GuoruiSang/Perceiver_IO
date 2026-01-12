@@ -51,9 +51,9 @@ DEFAULT_LOG_EVERY_N_STEPS = 10
 # Sampling/Generation Parameters
 # ===========================
 
-DEFAULT_NUM_SAMPLES = 2
+DEFAULT_NUM_SAMPLES = 8
 DEFAULT_SAMPLER = "ddim"  # choices: ["ddpm", "ddim", "ddpm_legacy"]
-DEFAULT_NUM_DIFFUSION_STEPS = 100
+DEFAULT_NUM_DIFFUSION_STEPS = 200
 DEFAULT_CONTEXT_FRACTION = 0.5
 DEFAULT_USE_EMA = True
 
@@ -70,7 +70,7 @@ DEFAULT_WANDB_RUN_NAME = 'Position&Momentum|Torque(AdaIN)'
 # Mode Configuration
 # ===========================
 
-DEFAULT_MODE = "train"  # choices: ["train", "generate_samples"]
+DEFAULT_MODE = "generate_samples"  # choices: ["train", "generate_samples"]
 DEFAULT_DEVICE = "gpu"  # "gpu" if available, else "cpu" (handled dynamically)
 
 # ===========================

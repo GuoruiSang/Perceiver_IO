@@ -1047,11 +1047,11 @@ def main():
                         help="Path to HNN checkpoint for physics-based guidance during sampling")
     parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin"], default="adam",
                         help="HNN guidance method: 'adam' or 'langevin'")
-    parser.add_argument("--guidance_after_steps", type=int, default=50,
+    parser.add_argument("--guidance_after_steps", type=int, default=100,
                         help="Start HNN guidance after this many diffusion steps (0 = from beginning)")
-    parser.add_argument("--guidance_steps", type=int, default=0,
+    parser.add_argument("--guidance_steps", type=int, default=10,
                         help="Number of HNN optimization steps per diffusion step (0 = disabled)")
-    parser.add_argument("--guidance_lr", type=float, default=1e-2,
+    parser.add_argument("--guidance_lr", type=float, default=2e-2,
                         help="Learning rate for adam HNN guidance")
     parser.add_argument("--langevin_step_size", type=float, default=1e-5,
                         help="Step size for langevin HNN guidance")
@@ -1059,8 +1059,10 @@ def main():
                         help="Noise scale for langevin HNN guidance")
     parser.add_argument("--lambda_init", type=float, default=1.0,
                         help="Weight for initial consistency term in HNN energy")
-    parser.add_argument("--seed", type=int, default=21,
+    parser.add_argument("--seed", type=int, default=228,
                         help="Random seed for reproducible sampling")
+    parser.add_argument("--use_trained_torque", action="store_true", default=False,
+                        help="Use torque sequences from training data instead of generating new random ones")
     
     # W&B arguments
     parser.add_argument("--wandb", type=bool, default=config.DEFAULT_WANDB_ENABLED, help="Enable Weights & Biases logging")
@@ -1143,6 +1145,24 @@ def main():
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(args.seed)
         
+        # Load torque from training data if requested
+        trained_torque = None
+        if args.use_trained_torque:
+            print(f"[Sampling] Loading torque sequences from training data: {args.h5_path}")
+            dataset = TrajectoryDPFCached(args.h5_path, trajectory_length=trajectory_length)
+            
+            # Sample random trajectories from dataset and extract their torques
+            import random
+            indices = random.sample(range(len(dataset)), min(args.num_samples, len(dataset)))
+            torque_list = []
+            for idx in indices:
+                sample = dataset[idx]
+                torque_list.append(sample['seq_torque'])
+            
+            trained_torque = torch.stack(torque_list).to(device)
+            print(f"[Sampling] Loaded {len(torque_list)} torque sequences from training data")
+            print(f"[Sampling] Torque shape: {trained_torque.shape}")
+        
         state, torque = model.sample_trajectories(
             num_samples=args.num_samples,
             trajectory_length=trajectory_length,
@@ -1159,23 +1179,53 @@ def main():
             langevin_step_size=args.langevin_step_size,
             langevin_noise_scale=args.langevin_noise_scale,
             lambda_init=args.lambda_init,
+            torque=trained_torque,  # Use training data torque if --use_trained_torque is set
         )
         
-        # Compare first trajectory with physics reconstruction
-        state_np = state[0].cpu().numpy()
-        torque_np = torque[0].cpu().numpy()
-        generated = {
-            'seq_qpos': state_np[:, :model.qpos_dim],
-            'seq_mom': state_np[:, model.qpos_dim:],
-            'seq_torque': torque_np,
-        }
-        compare_generated_with_reconstructed(
-            generated, '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml',
-            '/home/gsang/Projects/Perceiver_IO/plots',
-            dt=float(model.dt),
-            data_dt=float(model.data_dt),
-            name='comparison'
+        # Compare all trajectories with physics reconstruction
+        # Build descriptive name with inference parameters for reproducibility
+        torque_source = "trained" if args.use_trained_torque else "random"
+        ema_str = "ema" if args.use_ema else "noema"
+        
+        # Build guidance string based on method
+        if args.guidance_steps > 0:
+            if args.guidance_method == "adam":
+                guidance_str = f"hnn-{args.guidance_method}_after{args.guidance_after_steps}_steps{args.guidance_steps}_lr{args.guidance_lr}_lambda{args.lambda_init}"
+            else:  # langevin
+                guidance_str = f"hnn-{args.guidance_method}_after{args.guidance_after_steps}_steps{args.guidance_steps}_ss{args.langevin_step_size}_ns{args.langevin_noise_scale}_lambda{args.lambda_init}"
+        else:
+            guidance_str = "hnn-off"
+        
+        params_str = (
+            f"seed{args.seed}_"
+            f"{args.sampler}_"
+            f"diff{args.num_diffusion_steps}_"
+            f"ctx{args.context_fraction}_"
+            f"{ema_str}_"
+            f"cfg{args.guidance_scale}_"
+            f"{guidance_str}_"
+            f"len{trajectory_length}_"
+            f"torque-{torque_source}"
         )
+        
+        print(f"[Sampling] Saving comparison plots for {args.num_samples} samples...")
+        print(f"[Sampling] Plot name format: {params_str}_<idx>.jpg")
+        for i in range(args.num_samples):
+            state_np = state[i].cpu().numpy()
+            torque_np = torque[i].cpu().numpy()
+            generated = {
+                'seq_qpos': state_np[:, :model.qpos_dim],
+                'seq_mom': state_np[:, model.qpos_dim:],
+                'seq_torque': torque_np,
+            }
+            compare_generated_with_reconstructed(
+                generated, '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml',
+                '/home/gsang/Projects/Perceiver_IO/plots',
+                dt=float(model.dt),
+                data_dt=float(model.data_dt),
+                name=f'{params_str}_{i}'
+            )
+        print(f"[Sampling] Saved {args.num_samples} comparison plots to /home/gsang/Projects/Perceiver_IO/plots/")
         
         # Save to h5
         state_all = state.cpu().numpy()
