@@ -230,6 +230,14 @@ class TrajectoryDPF(pl.LightningModule):
         # Total input channels per token: state + diffusion_enc + temporal_enc
         # Token structure: [qpos | mom | diffusion_enc | temporal_enc]
         # NOTE: Torque is NOT in tokens - it's passed separately for AdaLN conditioning
+        num_input_channels_raw = self.state_dim + self.diffusion_encoding_channels + self.temporal_encoding_channels
+        
+        # Ensure num_input_channels is divisible by num_heads (8) for attention
+        num_heads = 8
+        if num_input_channels_raw % num_heads != 0:
+            padding = num_heads - (num_input_channels_raw % num_heads)
+            self.temporal_encoding_channels += padding
+            print(f"[Init] Padded temporal_encoding_channels by {padding} to make num_input_channels divisible by {num_heads}")
         num_input_channels = self.state_dim + self.diffusion_encoding_channels + self.temporal_encoding_channels
         
         # PerceiverIO backbone with per-step state-torque interaction conditioning
@@ -292,15 +300,17 @@ class TrajectoryDPF(pl.LightningModule):
         d = self.temporal_encoding_channels
         positions = torch.arange(T, device=device, dtype=torch.float32).unsqueeze(1)  # [T, 1]
         
-        # Frequency bands: 1, 1/10000^(2/d), 1/10000^(4/d), ...
-        dim_indices = torch.arange(0, d, 2, device=device, dtype=torch.float32)  # [d/2]
-        freqs = 1.0 / (10000.0 ** (dim_indices / d))  # [d/2]
+        # Number of sin/cos pairs (use floor division for odd d)
+        num_pairs = d // 2
+        dim_indices = torch.arange(0, num_pairs, device=device, dtype=torch.float32)  # [num_pairs]
+        freqs = 1.0 / (10000.0 ** (2.0 * dim_indices / d))  # [num_pairs]
         
         # Compute sin/cos encodings
-        angles = positions * freqs  # [T, d/2]
+        angles = positions * freqs  # [T, num_pairs]
         temporal_enc = torch.zeros(T, d, device=device)
-        temporal_enc[:, 0::2] = torch.sin(angles)
-        temporal_enc[:, 1::2] = torch.cos(angles)
+        temporal_enc[:, 0:num_pairs] = torch.sin(angles)
+        temporal_enc[:, num_pairs:2*num_pairs] = torch.cos(angles)
+        # Any remaining channels (if d is odd) stay as zeros (padding)
         
         return temporal_enc
     
@@ -1420,7 +1430,7 @@ def main():
     
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename='trajectory_dpf_PerStepInteraction:{epoch:03d}_val_loss:{val_loss:.4f}',
+        filename='trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap:{epoch:03d}_val_loss:{val_loss:.4f}',
         every_n_epochs=10,  # Save checkpoint every 10 epochs
     )
     callbacks.append(checkpoint_callback)

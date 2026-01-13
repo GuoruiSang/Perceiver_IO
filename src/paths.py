@@ -32,7 +32,7 @@ DEFAULT_TEST_DATAPATH_PATH = DATA_DIR / "traj_4000-steps_4000.h5"
 # ===========================
 
 CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
-DEFAULT_RESUME_CHECKPOINT = CHECKPOINT_DIR / "trajectory_dpf_StateOnlyAdaLN_x0Stabilized:epoch=2999_val_loss:val_loss=0.0081.ckpt"
+DEFAULT_RESUME_CHECKPOINT = None
 
 # ===========================
 # Output Paths
