@@ -221,13 +221,11 @@ class TrajectoryDPF(pl.LightningModule):
         )
         self.diffusion_encoding_channels = self.fpe_diffusion.num_position_encoding_channels()
         
-        # Fourier position encoding for temporal position in trajectory
+        # Temporal position encoding: use absolute sinusoidal (length-independent)
+        # This ensures timestep t gets the same encoding regardless of total trajectory length T
         self.num_temporal_frequency_bands = num_frequency_bands_for_diffusion // 2  # Use fewer bands for temporal
-        self.fpe_temporal = FourierPositionEncoding(
-            input_shape=(max_timesteps,),
-            num_frequency_bands=self.num_temporal_frequency_bands
-        )
-        self.temporal_encoding_channels = self.fpe_temporal.num_position_encoding_channels()
+        # Output channels = num_bands * 2 (sin + cos for each frequency band)
+        self.temporal_encoding_channels = self.num_temporal_frequency_bands * 2
         
         # Total input channels per token: state + diffusion_enc + temporal_enc
         # Token structure: [qpos | mom | diffusion_enc | temporal_enc]
@@ -271,6 +269,40 @@ class TrajectoryDPF(pl.LightningModule):
             self.ema = None
         # Track whether EMA shadow was restored from checkpoint
         self._ema_loaded = False
+    
+    def _get_temporal_encoding(self, T: int, device: torch.device) -> torch.Tensor:
+        """
+        Generate absolute sinusoidal temporal position encoding (length-independent).
+        
+        Timestep t always gets the same encoding regardless of total sequence length T.
+        This is crucial for trajectory extension: timestep 500 has identical encoding
+        whether T=1000 or T=1500.
+        
+        Uses standard Transformer-style sinusoidal encoding:
+            PE(t, 2i)   = sin(t / 10000^(2i/d))
+            PE(t, 2i+1) = cos(t / 10000^(2i/d))
+        
+        Args:
+            T: sequence length (number of timesteps)
+            device: torch device
+        
+        Returns:
+            temporal_enc: [T, temporal_encoding_channels] - position encodings
+        """
+        d = self.temporal_encoding_channels
+        positions = torch.arange(T, device=device, dtype=torch.float32).unsqueeze(1)  # [T, 1]
+        
+        # Frequency bands: 1, 1/10000^(2/d), 1/10000^(4/d), ...
+        dim_indices = torch.arange(0, d, 2, device=device, dtype=torch.float32)  # [d/2]
+        freqs = 1.0 / (10000.0 ** (dim_indices / d))  # [d/2]
+        
+        # Compute sin/cos encodings
+        angles = positions * freqs  # [T, d/2]
+        temporal_enc = torch.zeros(T, d, device=device)
+        temporal_enc[:, 0::2] = torch.sin(angles)
+        temporal_enc[:, 1::2] = torch.cos(angles)
+        
+        return temporal_enc
     
     def _setup_normalization(self, qpos_min, qpos_max, mom_min, mom_max, torque_min, torque_max):
         """
@@ -386,17 +418,11 @@ class TrajectoryDPF(pl.LightningModule):
         diffusion_enc = self.fpe_diffusion(B).to(device)[:, diffusion_t-1:diffusion_t, :]  # [B, 1, diff_enc_dim]
         diffusion_enc = diffusion_enc.expand(-1, T, -1)  # [B, T, diff_enc_dim]
         
-        # Temporal position encoding (different for each timestep in trajectory)
-        # Handle variable lengths: if T > max_timesteps, generate extended encoding
-        if T > self.max_timesteps:
-            from perceiver.model.core import FourierPositionEncoding
-            fpe_temporal_extended = FourierPositionEncoding(
-                input_shape=(T,),
-                num_frequency_bands=self.num_temporal_frequency_bands
-            )
-            temporal_enc = fpe_temporal_extended(B).to(device)[:, :T, :]  # [B, T, temp_enc_dim]
-        else:
-            temporal_enc = self.fpe_temporal(B).to(device)[:, :T, :]  # [B, T, temp_enc_dim]
+        # Temporal position encoding: absolute sinusoidal (LENGTH-INDEPENDENT)
+        # Timestep t always gets the same encoding regardless of total T
+        # This is crucial for trajectory extension without performance degradation
+        temporal_enc = self._get_temporal_encoding(T, device)  # [T, temp_enc_dim]
+        temporal_enc = temporal_enc.unsqueeze(0).expand(B, -1, -1)  # [B, T, temp_enc_dim]
 
         # Concatenate: [state | diffusion_enc | temporal_enc]
         # NOTE: Torque is NOT included - passed separately for AdaLN conditioning
@@ -799,7 +825,10 @@ class TrajectoryDPF(pl.LightningModule):
         print(f"[Sampling] CFG guidance_scale={guidance_scale}")
         
         # PREFIX context: use first num_context timesteps (not random)
-        num_context = max(1, min(trajectory_length - 1, int(trajectory_length * context_fraction)))
+        # IMPORTANT: Cap context length to training max to avoid OOD encoder behavior when extending
+        max_context_train = int(self.max_timesteps * context_fraction)
+        num_context = max(1, min(trajectory_length - 1, max_context_train))
+        print(f"[Sampling] Context length: {num_context} (capped at {max_context_train} from training length {self.max_timesteps})")
 
         for i, t in enumerate(tqdm(ts, total=len(ts), desc="Sampling")):
             t_int = int(t.item())
