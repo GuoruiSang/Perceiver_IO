@@ -243,7 +243,6 @@ if __name__ == "__main__":
     print("Aggregating results...")
     for res in tqdm.tqdm(results, total=len(results), desc="Aggregating results"):
         q, v, a, tau, p, dp = res
-        # plot_trajectory(q[0], v[0], a[0], p[0], dp[0], tau[0], 'trajectory_3_dof_hinge_with_torque')
         data_store['q_t'].extend(q)
         data_store['v_t'].extend(v)
         data_store['a_t'].extend(a)
@@ -274,9 +273,6 @@ if __name__ == "__main__":
     flat_p = final_data['momentum_t'].reshape(-1, final_data['momentum_t'].shape[-1]).numpy()
     os.makedirs('Projects/Perceiver_IO/data', exist_ok=True)
     plot_coverage(flat_q, flat_p, save_path='Projects/Perceiver_IO/data/coverage_3dof_hinge_forced.png')
-
-    # Add p_t alias
-    final_data['p_t'] = final_data['q_t'].clone()
 
     # Save
     save_path = f'Projects/Perceiver_IO/data/trajectory_3_dof_hinge_with_torque_{TOTAL_TRAJ*NUM_TIMESTEPS}.pt'

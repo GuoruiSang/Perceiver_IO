@@ -309,15 +309,11 @@ def calculate_energy(qpos: torch.Tensor, qvel: torch.Tensor, torque: torch.Tenso
     e1 = qpos_energy(qpos, n_joints)
     e2 = qvel_smoothness_energy(qvel)
     e3 = qpos_qvel_consistency_energy(qpos, qvel, timestep)
-    # e4 = torque_consistency_energy(qpos, torque, model)  # Commented out
 
-    # Rebalanced weights to ensure qvel is optimized
-    # E1 (qpos norm)
-    # E2 (qvel smoothness)
-    # E3 (consistency)
+    # Weights: E1 (qpos norm), E2 (qvel smoothness), E3 (consistency)
     k1, k2, k3 = 0.1, 1, 0.1
 
-    return k1*e1 + k2*e2 + k3*e3  # + k4*e4 commented out
+    return k1*e1 + k2*e2 + k3*e3
 
 def langevin_dynamics(
     qpos: torch.Tensor, 
@@ -524,13 +520,6 @@ def visualize_trajectory(trajectory: dict, save_path: str, name: str = 'trajecto
     fig.savefig(os.path.join(save_path, f'{name}.jpg'))
     plt.close(fig)
 
-
-# trajectory = {
-#     'seq_qpos': torch.zeros(500, 3),
-#     'seq_qvel': torch.zeros(500, 4)
-# }
-
-# visualize_trajectory(trajectory, '/home/gsang/Projects/Perceiver_IO/plots')
 
 def compute_qpos_qvel_qacc_consistency_energy(
     qpos: torch.Tensor, 

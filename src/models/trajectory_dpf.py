@@ -19,7 +19,6 @@ import os
 from typing import Optional, Tuple
 import argparse
 from tqdm import tqdm
-from einops import rearrange
 
 try:
     import wandb
@@ -861,20 +860,8 @@ class TrajectoryDPF(pl.LightningModule):
                 
                 # CFG combination
                 eps = eps_uncond + guidance_scale * (eps_cond - eps_uncond)
-                
-                # DEBUG: Print diagnostic info at key steps
-                if i in [0, len(ts)//2, len(ts)-1]:
-                    eps_diff = (eps_cond - eps_uncond).abs().mean().item()
-                    print(f"[DEBUG] Step {i}, t={t_int}: eps_cond range=[{eps_cond.min():.4f}, {eps_cond.max():.4f}], "
-                          f"eps_uncond range=[{eps_uncond.min():.4f}, {eps_uncond.max():.4f}], "
-                          f"|eps_cond - eps_uncond| mean={eps_diff:.6f}")
             else:
                 eps = eps_cond
-                
-                # DEBUG: Print diagnostic info at key steps  
-                if i in [0, len(ts)//2, len(ts)-1]:
-                    print(f"[DEBUG] Step {i}, t={t_int}: eps range=[{eps.min():.4f}, {eps.max():.4f}], "
-                          f"eps mean={eps.mean():.4f}, eps std={eps.std():.4f}")
             
             # Extract current state
             x_t = x  # Already just the state part (not in tokens)
@@ -907,14 +894,6 @@ class TrajectoryDPF(pl.LightningModule):
                 
             elif sampler == "ddim":
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
-                
-                # DEBUG: Check x0 temporal variation at key steps
-                if i in [0, len(ts)//2, len(ts)-1]:
-                    # Check if x0 varies across time (dim 1) - should NOT be constant
-                    x0_time_std = x0.std(dim=1).mean().item()  # Std across timesteps, averaged over batch and dims
-                    x0_dim_std = x0.std(dim=2).mean().item()   # Std across state dims
-                    print(f"[DEBUG] Step {i}: x0 temporal_std={x0_time_std:.6f}, dim_std={x0_dim_std:.6f}, "
-                          f"x0 range=[{x0.min():.4f}, {x0.max():.4f}]")
                 
                 # Apply HNN-based guidance
                 if hnn is not None and guidance_steps > 0 and i >= guidance_after_steps:
@@ -963,13 +942,9 @@ class TrajectoryDPF(pl.LightningModule):
                 c = torch.sqrt(torch.clamp(1.0 - a_bar_prev - sigma_t * sigma_t, min=0.0))
                 z = torch.randn_like(x_t) if (sigma_t.item() > 0.0) else torch.zeros_like(x_t)
                 x = torch.sqrt(a_bar_prev) * x0 + c * eps + sigma_t * z
-            
-            if i == 0:
-                print(f"[Sampling Debug] Step {i}: x range: [{x.min():.4f}, {x.max():.4f}]")
         
         # Denormalize state
         state = self.denormalize_state(x)
-        print(f"[Sampling Debug] Final state range: [{state.min():.4f}, {state.max():.4f}]")
         
         # Restore original weights if EMA was applied
         if use_ema and self.ema is not None:
@@ -1267,7 +1242,6 @@ def main():
         state_all = state.cpu().numpy()
         torque_all = torque.cpu().numpy()
         os.makedirs(os.path.dirname(args.output_path) or '.', exist_ok=True)
-        import h5py
         with h5py.File(args.output_path, 'w') as f:
             f.attrs['num_trajectories'] = args.num_samples
             f.attrs['num_steps'] = trajectory_length

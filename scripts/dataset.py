@@ -176,10 +176,5 @@ class TrajectoryDPFCached(Dataset):
         }
 
 if __name__ == '__main__':
-    # dataset = TrajectoryHNN('/home/gsang/Projects/Perceiver_IO/data/traj_100-steps_1000.h5')
-    
-    # print(len(dataset))
-
     dataset = TrajectoryDPFCached('/home/gsang/Projects/Perceiver_IO/output/generated_trajectories.h5')
-
     print(dataset[0]['seq_qpos'].shape)

@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from torch.utils.data import Dataset, DataLoader, random_split
-from einops import rearrange
 import numpy as np
 import matplotlib.pyplot as plt
 from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
