@@ -1054,7 +1054,7 @@ def main():
     # CFG and guidance parameters
     parser.add_argument("--guidance_scale", type=float, default=4.0,
                         help="Classifier-free guidance scale (1.0 = no CFG, >1.0 = stronger conditioning)")
-    parser.add_argument("--hnn_checkpoint", type=str, default='/home/gsang/Projects/Perceiver_IO/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt',
+    parser.add_argument("--hnn_checkpoint", type=str, default='/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt',
                         help="Path to HNN checkpoint for physics-based guidance during sampling")
     parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin"], default="adam",
                         help="HNN guidance method: 'adam' or 'langevin'")

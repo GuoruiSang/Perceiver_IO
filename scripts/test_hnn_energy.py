@@ -24,7 +24,7 @@ from src.models.utils import compute_hnn_physics_energy, central_difference
 
 def main():
     # Configuration
-    hnn_checkpoint_path = '/home/gsang/Projects/Perceiver_IO/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt'
+    hnn_checkpoint_path = '/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt'
     data_path = '/home/gsang/Projects/Perceiver_IO/data/traj_4000-steps_4000.h5'
     trajectory_length = 1000
     num_test_trajectories = 10

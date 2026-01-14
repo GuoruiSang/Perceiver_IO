@@ -154,7 +154,7 @@ def plot_trajectory(q_t, v_t, a_t, momentum_t, momentum_dot_t, torque_t, type):
             plt.subplot(num_rows, num_cols, i+1+q_t.shape[1]+v_t.shape[1]+a_t.shape[1]+momentum_t.shape[1]+momentum_dot_t.shape[1])
             plt.plot(torque_t[:, i], label=f'torque_{i}')
             plt.legend()
-    plt.savefig(f'Projects/Perceiver_IO/data/{type}.png')   
+    plt.savefig(f'/home/gsang/Projects/Perceiver_IO/data/{type}.png')   
     plt.close()
 
 
@@ -271,11 +271,11 @@ if __name__ == "__main__":
     # Coverage visualization (flatten to (N*T, dim))
     flat_q = final_data['q_t'].reshape(-1, final_data['q_t'].shape[-1]).numpy()
     flat_p = final_data['momentum_t'].reshape(-1, final_data['momentum_t'].shape[-1]).numpy()
-    os.makedirs('Projects/Perceiver_IO/data', exist_ok=True)
-    plot_coverage(flat_q, flat_p, save_path='Projects/Perceiver_IO/data/coverage_3dof_hinge_forced.png')
+    os.makedirs('/home/gsang/Projects/Perceiver_IO/data', exist_ok=True)
+    plot_coverage(flat_q, flat_p, save_path='/home/gsang/Projects/Perceiver_IO/data/coverage_3dof_hinge_forced.png')
 
     # Save
-    save_path = f'Projects/Perceiver_IO/data/trajectory_3_dof_hinge_with_torque_{TOTAL_TRAJ*NUM_TIMESTEPS}.pt'
+    save_path = f'/home/gsang/Projects/Perceiver_IO/data/trajectory_3_dof_hinge_with_torque_{TOTAL_TRAJ*NUM_TIMESTEPS}.pt'
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save(final_data, save_path)
     print(f"Saved to {save_path}")

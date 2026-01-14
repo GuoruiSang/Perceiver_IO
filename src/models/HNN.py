@@ -655,7 +655,7 @@ if __name__ == "__main__":
     train_file = "/home/gsang/Projects/Perceiver_IO/data/traj_40000-steps_4000.h5"
     test_file = "/home/gsang/Projects/Perceiver_IO/data/traj_4000-steps_4000.h5"
 
-    test_checkpoint_file = "/home/gsang/Projects/Perceiver_IO/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt"
+    test_checkpoint_file = "/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt"
     if mode == 'train':
         print("-"*60)
         print(" "*25+"Start Training")
@@ -695,7 +695,7 @@ if __name__ == "__main__":
 
 
         checkpoint_callback = ModelCheckpoint(
-            dirpath='Projects/Perceiver_IO/checkpoints',
+            dirpath='/home/gsang/Projects/Perceiver_IO/checkpoints',
             filename='SeperableHNN(dim1024)-CELU-epoch-{epoch}',
             every_n_epochs=50,  # Save every 50 epochs to reduce I/O
             save_top_k=-1)     # Keep all checkpoints (don't delete old ones)
@@ -703,7 +703,7 @@ if __name__ == "__main__":
         verify_callback = PhysicsCheckCallback(check_every_n_epochs=50, dt=0.00025)  # Run less frequently
         # Only refresh progress bar every 100 batches - prevents SSH lag!
         progress_bar = TQDMProgressBar(refresh_rate=100)
-        wandb_logger = WandbLogger(project='HNN_Hinge', name='SeperableHNN(dim1024)-3D-Hinge-CELU', save_dir='Projects/Perceiver_IO/wandb')
+        wandb_logger = WandbLogger(project='HNN_Hinge', name='SeperableHNN(dim1024)-3D-Hinge-CELU', save_dir='/home/gsang/Projects/Perceiver_IO/wandb')
         
     elif mode == 'test':
         print("-"*60)
