@@ -922,10 +922,7 @@ class TrajectoryDPF(pl.LightningModule):
                     # x0 lives in "normalized state space" (intended ~[-1, 1]) but can exceed that range.
                     # If we denormalize an unclamped x0, we can push qpos/mom far outside the training
                     # distribution, which explodes finite differences and HNN physics energy.
-                    x0 = torch.clamp(x0, -1.0, 1.0)
                     x0_phys = self.denormalize_state(x0)
-                    seq_qpos = x0_phys[:, :, :self.qpos_dim]
-                    seq_mom = x0_phys[:, :, self.qpos_dim:]
                     
                     if guidance_method == "adam":
                         x0_phys = run_adam_optimization_hnn(
