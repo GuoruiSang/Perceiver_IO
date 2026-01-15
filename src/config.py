@@ -70,7 +70,7 @@ DEFAULT_WANDB_RUN_NAME = 'Position&Momentum|Torque(AdaIN)&StateOnlyAdaLN_x0Stabi
 # Mode Configuration
 # ===========================
 
-DEFAULT_MODE = "train"  # choices: ["train", "generate_samples"]
+DEFAULT_MODE = "generate_samples"  # choices: ["train", "generate_samples"]
 DEFAULT_DEVICE = "gpu"  # "gpu" if available, else "cpu" (handled dynamically)
 
 # ===========================
