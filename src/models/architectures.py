@@ -528,10 +528,15 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         self.interaction_mlp = InteractionMLP(cond_dim)
         
         # Global conditioning projection (for encoder, if enabled)
-        if encoder_cond_mode != "none":
+        if encoder_cond_mode == "mean":
             self.global_cond_proj = nn.Linear(cond_dim, cond_dim)
+            self.cond_rnn = None
+        elif encoder_cond_mode == "rnn":
+            self.global_cond_proj = nn.Linear(cond_dim, cond_dim)
+            self.cond_rnn = nn.GRU(cond_dim, cond_dim, batch_first=True)
         else:
             self.global_cond_proj = None
+            self.cond_rnn = None
         
         # Conditioned encoder
         self.encoder = ConditionedPerceiverEncoder(
@@ -595,6 +600,11 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         if self.encoder_cond_mode == "mean" and self.global_cond_proj is not None:
             # Use mean of interaction embeddings (not shifted) for global context
             global_cond = self.global_cond_proj(c.mean(dim=1, keepdim=True))  # [B, 1, cond_dim]
+        elif self.encoder_cond_mode == "rnn" and self.global_cond_proj is not None:
+            # Use final state of GRU over interaction embeddings sequence for global context
+            _, h_n = self.cond_rnn(c)  # h_n: [1, B, cond_dim]
+            # Permute to [B, 1, cond_dim] to match expected shape for AdaLN
+            global_cond = self.global_cond_proj(h_n.permute(1, 0, 2))
         else:
             # No encoder conditioning - use zeros
             global_cond = torch.zeros(B, 1, self.cond_dim, device=queries.device, dtype=queries.dtype)

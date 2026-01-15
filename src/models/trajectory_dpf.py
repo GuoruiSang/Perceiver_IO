@@ -176,7 +176,7 @@ class TrajectoryDPF(pl.LightningModule):
         use_ema: bool = True,
         p_uncond: float = 0.1,  # Probability of dropping conditioning for CFG
         lambda_cond: float = 0.1,  # Weight for conditioning regularization loss
-        encoder_cond_mode: str = "mean",  # "mean" or "none" for encoder global conditioning
+        encoder_cond_mode: str = "rnn",  # "mean", "rnn" or "none" for encoder global conditioning
         # Simulation metadata (loaded from dataset)
         dt: float = 0.0001,  # Fine simulation timestep
         data_dt: float = 0.00025,  # Data collection timestep
@@ -1401,7 +1401,7 @@ def main():
     
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename='trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap:{epoch:03d}_val_loss:{val_loss:.4f}',
+        filename='trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap&EncoderGRU:{epoch:03d}_val_loss:{val_loss:.4f}',
         every_n_epochs=10,  # Save checkpoint every 10 epochs
     )
     callbacks.append(checkpoint_callback)

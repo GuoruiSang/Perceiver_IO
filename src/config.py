@@ -64,13 +64,13 @@ DEFAULT_USE_EMA = True
 DEFAULT_WANDB_ENABLED = True
 DEFAULT_WANDB_PROJECT = "trajectory-dpf-smooth"
 DEFAULT_WANDB_ENTITY = None
-DEFAULT_WANDB_RUN_NAME = 'Position&Momentum|Torque(AdaIN)&StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap'
+DEFAULT_WANDB_RUN_NAME = 'Position&Momentum|Torque(AdaIN)&StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap&EncoderGRU'
 
 # ===========================
 # Mode Configuration
 # ===========================
 
-DEFAULT_MODE = "generate_samples"  # choices: ["train", "generate_samples"]
+DEFAULT_MODE = "train"  # choices: ["train", "generate_samples"]
 DEFAULT_DEVICE = "gpu"  # "gpu" if available, else "cpu" (handled dynamically)
 
 # ===========================
