@@ -240,6 +240,24 @@ class TrajectoryDPF(pl.LightningModule):
             self.temporal_encoding_channels += padding
             print(f"[Init] Padded temporal_encoding_channels by {padding} to make num_input_channels divisible by {num_heads}")
         num_input_channels = self.state_dim + self.diffusion_encoding_channels + self.temporal_encoding_channels
+
+        # ------------------------------------------------------------------
+        # Token encoding caches (major speed win)
+        # ------------------------------------------------------------------
+        # `build_tokens()` is called every step. Previously it regenerated:
+        # - the full diffusion Fourier table [B, diffusion_steps, C] every step
+        #   just to slice one timestep, and then copied it to GPU.
+        # - the temporal sin/cos table [T, C] every step.
+        #
+        # Cache both as buffers so they live on the right device and are reused.
+        with torch.no_grad():
+            # [diffusion_steps, diff_enc_dim]
+            diffusion_table = self.fpe_diffusion(1)[0].contiguous()
+            # [max_timesteps, temp_enc_dim]
+            temporal_table = self._get_temporal_encoding(max_timesteps, device=torch.device("cpu")).contiguous()
+
+        self.register_buffer("diffusion_encoding_table", diffusion_table, persistent=True)
+        self.register_buffer("temporal_encoding_table", temporal_table, persistent=True)
         
         # PerceiverIO backbone with per-step state-torque interaction conditioning
         self.model = ConditionedTrajectoryPerceiverIO(
@@ -427,13 +445,18 @@ class TrajectoryDPF(pl.LightningModule):
         normalized_state = state if skip_normalize else self.normalize_state(state)
         
         # Diffusion timestep encoding (same for all timesteps)
-        diffusion_enc = self.fpe_diffusion(B).to(device)[:, diffusion_t-1:diffusion_t, :]  # [B, 1, diff_enc_dim]
-        diffusion_enc = diffusion_enc.expand(-1, T, -1)  # [B, T, diff_enc_dim]
+        # Cached table: [diffusion_steps, diff_enc_dim] -> take one row and expand.
+        diffusion_vec = self.diffusion_encoding_table[diffusion_t - 1].to(device=device, dtype=normalized_state.dtype)
+        diffusion_enc = diffusion_vec.view(1, 1, -1).expand(B, T, -1)  # [B, T, diff_enc_dim]
         
         # Temporal position encoding: absolute sinusoidal (LENGTH-INDEPENDENT)
         # Timestep t always gets the same encoding regardless of total T
         # This is crucial for trajectory extension without performance degradation
-        temporal_enc = self._get_temporal_encoding(T, device)  # [T, temp_enc_dim]
+        if T <= self.temporal_encoding_table.shape[0]:
+            temporal_enc = self.temporal_encoding_table[:T].to(device=device, dtype=normalized_state.dtype)  # [T, temp_enc_dim]
+        else:
+            # Fallback (rare in training): build on the fly for longer sequences.
+            temporal_enc = self._get_temporal_encoding(T, device).to(dtype=normalized_state.dtype)
         temporal_enc = temporal_enc.unsqueeze(0).expand(B, -1, -1)  # [B, T, temp_enc_dim]
 
         # Concatenate: [state | diffusion_enc | temporal_enc]
@@ -467,8 +490,7 @@ class TrajectoryDPF(pl.LightningModule):
             self.sqrt_one_minus_alpha_cumprod[diffusion_t - 1] * noise
         )
         
-        # Replace state slice with noisy version
-        tokens = tokens.clone()
+        # Replace state slice with noisy version (in-place: tokens are freshly built per step)
         tokens[:, :, state_start:state_end] = noisy_state
         
         if return_noise:
@@ -1087,6 +1109,15 @@ def main():
     parser.add_argument("--wandb_run_name", type=str, default=config.DEFAULT_WANDB_RUN_NAME, help="W&B run name")
     
     args = parser.parse_args()
+
+    # Speed knobs for modern NVIDIA GPUs (A100 etc.)
+    # - TF32 accelerates float32 matmuls on Tensor Cores with negligible impact for most training.
+    # - bf16 mixed precision enables Flash SDP kernels for attention in torch 2.0 (big speedup).
+    if torch.cuda.is_available():
+        try:
+            torch.set_float32_matmul_precision("high")
+        except Exception as e:
+            print(f"[Perf] Warning: failed to set float32 matmul precision: {e}")
     
     # Execute based on mode
     if args.mode == "generate_samples":
@@ -1288,9 +1319,11 @@ def main():
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
     
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, 
-                             num_workers=args.num_workers, pin_memory=True)
+                             num_workers=args.num_workers, pin_memory=True,
+                             persistent_workers=(args.num_workers > 0))
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
-                           num_workers=args.num_workers, pin_memory=True)
+                           num_workers=args.num_workers, pin_memory=True,
+                           persistent_workers=(args.num_workers > 0))
     
     # Compute normalization stats (min-max for scaling to [-1, 1])
     stats_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
@@ -1428,6 +1461,7 @@ def main():
         devices=[0,1],
         callbacks=callbacks,
         logger=logger,
+        precision="bf16-mixed" if torch.cuda.is_available() else 32,
         # gradient_clip_val=1.0,
         log_every_n_steps=10,
     )
