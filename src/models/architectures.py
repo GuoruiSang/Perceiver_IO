@@ -420,12 +420,14 @@ class ConditionedPerceiverEncoder(nn.Module):
 
 class ConditionedPerceiverDecoder(nn.Module):
     """
-    PerceiverIO decoder with STATE-ONLY AdaLN-conditioned cross-attention.
+    PerceiverIO decoder with STATE-ONLY AdaLN-conditioned cross-attention
+    AND optional self-attention blocks for refinement.
     
     Architecture:
     1. Cross-attention: queries attend to latents with per-timestep torque modulation (AdaLN)
        - AdaLN only modulates state portion, leaving diffusion/temporal encodings untouched
-    2. Output projection to state dimensions
+    2. Optional Self-Attention Blocks: refinement with per-timestep torque modulation (AdaLN)
+    3. Output projection to state dimensions
     """
     
     def __init__(
@@ -437,6 +439,7 @@ class ConditionedPerceiverDecoder(nn.Module):
         cond_dim: int = 256,
         num_heads: int = 8,
         dropout: float = 0.0,
+        num_decoder_blocks: int = 0,  # NEW: Number of self-attention blocks
     ):
         super().__init__()
         
@@ -449,6 +452,17 @@ class ConditionedPerceiverDecoder(nn.Module):
             num_heads=num_heads,
             dropout=dropout,
         )
+        
+        # Self-attention blocks with AdaLN conditioning (refinement)
+        self.self_attn_blocks = nn.ModuleList([
+            AdaLNSelfAttentionBlock(
+                dim=num_query_channels,
+                cond_dim=cond_dim,
+                num_heads=num_heads,
+                dropout=dropout
+            )
+            for _ in range(num_decoder_blocks)
+        ])
         
         # Output projection
         self.output_norm = nn.LayerNorm(num_query_channels)
@@ -470,6 +484,10 @@ class ConditionedPerceiverDecoder(nn.Module):
         """
         # Cross-attention with per-timestep AdaLN modulation
         output = self.cross_attn(queries, latents, cond)
+        
+        # Self-attention blocks for refinement (with per-timestep AdaLN)
+        for block in self.self_attn_blocks:
+            output = block(output, cond)
         
         # Output projection
         output = self.output_proj(self.output_norm(output))
@@ -506,6 +524,7 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         num_latent_channels: int = 256,
         cond_dim: int = 256,
         num_self_attention_blocks: int = 8,
+        num_decoder_blocks: int = 0,  # NEW: Number of decoder self-attention blocks
         num_heads: int = 8,
         dropout: float = 0.0,
         encoder_cond_mode: str = "mean",  # "mean", "none"
@@ -558,6 +577,7 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
             cond_dim=cond_dim,
             num_heads=num_heads,
             dropout=dropout,
+            num_decoder_blocks=num_decoder_blocks,  # Pass number of decoder blocks
         )
     
     def forward(

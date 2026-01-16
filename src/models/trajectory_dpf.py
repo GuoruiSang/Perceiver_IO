@@ -171,6 +171,7 @@ class TrajectoryDPF(pl.LightningModule):
         num_latents: int = 256,
         num_latent_channels: int = 256,
         cond_dim: int = 256,  # Dimension of conditioning embeddings
+        num_decoder_blocks: int = 0,  # NEW: Number of decoder self-attention blocks
         context_fraction_range: Tuple[float, float] = (0.3, 0.7),
         lr: float = 1e-4,
         use_ema: bool = True,
@@ -197,6 +198,7 @@ class TrajectoryDPF(pl.LightningModule):
         self.torque_dim = torque_dim
         self.state_dim = qpos_dim + mom_dim  # State to denoise (qpos + mom)
         self.adaln_cond_dim = cond_dim  # Conditioning embedding dimension for AdaLN
+        self.num_decoder_blocks = num_decoder_blocks
         self.max_timesteps = max_timesteps
         self.diffusion_steps = diffusion_steps
         self.context_fraction_range = context_fraction_range
@@ -248,6 +250,7 @@ class TrajectoryDPF(pl.LightningModule):
             num_latents=num_latents,
             num_latent_channels=num_latent_channels,
             cond_dim=cond_dim,
+            num_decoder_blocks=num_decoder_blocks,  # Pass it down
             encoder_cond_mode=encoder_cond_mode,
         )
         
@@ -1035,6 +1038,8 @@ def main():
     parser.add_argument("--num_latents", type=int, default=config.DEFAULT_NUM_LATENTS)
     parser.add_argument("--num_latent_channels", type=int, default=config.DEFAULT_NUM_LATENT_CHANNELS)
     parser.add_argument("--diffusion_steps", type=int, default=config.DEFAULT_DIFFUSION_STEPS)
+    parser.add_argument("--num_decoder_blocks", type=int, default=0,
+                        help="Number of self-attention blocks in the decoder for trajectory refinement")
     
     # Generation parameters
     parser.add_argument("--num_samples", type=int, default=config.DEFAULT_NUM_SAMPLES, help="Number of trajectories to generate")
@@ -1349,6 +1354,7 @@ def main():
         num_latents=args.num_latents,
         num_latent_channels=args.num_latent_channels,
         cond_dim=256,  # AdaLN conditioning embedding dimension
+        num_decoder_blocks=args.num_decoder_blocks,
         lr=args.lr,
         encoder_cond_mode="none",  # Global encoder conditioning: "mean", "rnn" or "none"
         dt=dt,
@@ -1391,6 +1397,7 @@ def main():
                 'lr': args.lr,
                 'num_latents': args.num_latents,
                 'num_latent_channels': args.num_latent_channels,
+                'num_decoder_blocks': args.num_decoder_blocks,
                 'diffusion_steps': args.diffusion_steps,
                 'epochs': args.epochs,
             })
