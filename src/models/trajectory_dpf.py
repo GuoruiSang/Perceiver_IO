@@ -410,9 +410,25 @@ class TrajectoryDPF(pl.LightningModule):
     
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.trainer.estimated_stepping_batches
-        )
+        
+        # Total steps for scheduling
+        total_steps = self.trainer.estimated_stepping_batches
+        
+        # Warmup + Cosine Annealing for stability
+        # Warmup prevents early gradient explosions
+        warmup_steps = min(1000, total_steps // 10)  # 10% warmup, max 1000 steps
+        
+        def lr_lambda(step):
+            if step < warmup_steps:
+                # Linear warmup
+                return float(step) / float(max(1, warmup_steps))
+            else:
+                # Cosine decay after warmup
+                progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+                return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+        
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        
         return {
             "optimizer": optimizer,
             "lr_scheduler": {"scheduler": scheduler, "interval": "step"},
@@ -535,8 +551,13 @@ class TrajectoryDPF(pl.LightningModule):
         # Predict noise (torque passed separately for per-step AdaLN conditioning)
         predictions = self.model(noisy_contexts, noisy_queries, torque_norm)
             
-        # Main loss: predict noise
+        # Main loss: predict noise with stability safeguards
         loss_denoise = F.mse_loss(predictions, noise)
+        
+        # ========== STABILITY: Skip NaN/Inf losses ==========
+        if not torch.isfinite(loss_denoise):
+            print(f"[WARNING] NaN/Inf loss detected at step {batch_idx}, skipping batch")
+            return None  # PyTorch Lightning will skip this batch
         
         loss = loss_denoise
         
@@ -630,6 +651,23 @@ class TrajectoryDPF(pl.LightningModule):
             for name, param in self.model.named_parameters():
                 if param.requires_grad and name in self.ema.shadow:
                     self.ema.shadow[name] = self.ema.shadow[name].to(device=param.device, dtype=param.dtype)
+    
+    def on_before_optimizer_step(self, optimizer):
+        """Log gradient norms for monitoring training stability."""
+        # Compute gradient norm across all parameters
+        total_norm = 0.0
+        for p in self.model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+        
+        # Log gradient norm (helps detect exploding gradients early)
+        self.log('grad_norm', total_norm, prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        
+        # Warn if gradient norm is suspiciously high (pre-clipping value)
+        if total_norm > 10.0:
+            print(f"[WARNING] High gradient norm: {total_norm:.2f} (will be clipped to 1.0)")
     
     def on_train_batch_end(self, outputs, batch, batch_idx):
         """Update EMA after each training batch."""
@@ -1060,7 +1098,7 @@ def main():
     parser.add_argument("--num_latents", type=int, default=config.DEFAULT_NUM_LATENTS)
     parser.add_argument("--num_latent_channels", type=int, default=config.DEFAULT_NUM_LATENT_CHANNELS)
     parser.add_argument("--diffusion_steps", type=int, default=config.DEFAULT_DIFFUSION_STEPS)
-    parser.add_argument("--num_decoder_blocks", type=int, default=0,
+    parser.add_argument("--num_decoder_blocks", type=int, default=4,
                         help="Number of self-attention blocks in the decoder for trajectory refinement")
     
     # Generation parameters
@@ -1079,15 +1117,15 @@ def main():
                         help="Whether to use EMA weights for sampling")
     
     # CFG and guidance parameters
-    parser.add_argument("--guidance_scale", type=float, default=2.0,
+    parser.add_argument("--guidance_scale", type=float, default=4.0,
                         help="Classifier-free guidance scale (1.0 = no CFG, >1.0 = stronger conditioning)")
     parser.add_argument("--hnn_checkpoint", type=str, default='/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt',
                         help="Path to HNN checkpoint for physics-based guidance during sampling")
     parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin"], default="adam",
                         help="HNN guidance method: 'adam' or 'langevin'")
-    parser.add_argument("--guidance_after_steps", type=int, default=100,
+    parser.add_argument("--guidance_after_steps", type=int, default=175,
                         help="Start HNN guidance after this many diffusion steps (0 = from beginning)")
-    parser.add_argument("--guidance_steps", type=int, default=10,
+    parser.add_argument("--guidance_steps", type=int, default=400,
                         help="Number of HNN optimization steps per diffusion step (0 = disabled)")
     parser.add_argument("--guidance_lr", type=float, default=5e-2,
                         help="Learning rate for adam HNN guidance")
@@ -1095,7 +1133,7 @@ def main():
                         help="Step size for langevin HNN guidance")
     parser.add_argument("--langevin_noise_scale", type=float, default=0,
                         help="Noise scale for langevin HNN guidance")
-    parser.add_argument("--lambda_init", type=float, default=1,
+    parser.add_argument("--lambda_init", type=float, default=100,
                         help="Weight for initial consistency term in HNN energy")
     parser.add_argument("--seed", type=int, default=228,
                         help="Random seed for reproducible sampling")
@@ -1441,7 +1479,7 @@ def main():
     
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename='trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap&EncoderNone:{epoch:03d}_val_loss:{val_loss:.4f}',
+        filename='trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap&EncoderNone&DecoderAttentions:{epoch:03d}_val_loss:{val_loss:.4f}',
         every_n_epochs=10,  # Save checkpoint every 10 epochs
     )
     callbacks.append(checkpoint_callback)
@@ -1458,11 +1496,12 @@ def main():
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-        devices=[0,1],
+        devices=[0, 2],
         callbacks=callbacks,
         logger=logger,
-        precision="bf16-mixed" if torch.cuda.is_available() else 32,
-        # gradient_clip_val=1.0,
+        # precision="bf16-mixed" if torch.cuda.is_available() else 32,
+        gradient_clip_val=1.0,  # ENABLED: Prevents gradient explosion
+        gradient_clip_algorithm="norm",  # Clip by global norm (more stable than value)
         log_every_n_steps=10,
     )
     

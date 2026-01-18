@@ -28,7 +28,7 @@ DEFAULT_OUTPUT_PATH = str(DEFAULT_GENERATED_TRAJECTORIES_PATH)
 # ===========================
 
 # Data loading
-DEFAULT_BATCH_SIZE = 256
+DEFAULT_BATCH_SIZE = 128
 DEFAULT_NUM_WORKERS = 16
 DEFAULT_TRAIN_VAL_SPLIT = 0.9  # 90% train, 10% val
 
@@ -64,7 +64,7 @@ DEFAULT_USE_EMA = True
 DEFAULT_WANDB_ENABLED = True
 DEFAULT_WANDB_PROJECT = "trajectory-dpf-smooth"
 DEFAULT_WANDB_ENTITY = None
-DEFAULT_WANDB_RUN_NAME = 'Position&Momentum|Torque(AdaIN)&StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap&EncoderNone'
+DEFAULT_WANDB_RUN_NAME = 'Position&Momentum|Torque(AdaIN)&StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap&EncoderNone&DecoderAttentions'
 
 # ===========================
 # Mode Configuration
