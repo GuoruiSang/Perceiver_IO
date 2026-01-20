@@ -1117,23 +1117,23 @@ def main():
                         help="Whether to use EMA weights for sampling")
     
     # CFG and guidance parameters
-    parser.add_argument("--guidance_scale", type=float, default=4.0,
+    parser.add_argument("--guidance_scale", type=float, default=1.2,
                         help="Classifier-free guidance scale (1.0 = no CFG, >1.0 = stronger conditioning)")
     parser.add_argument("--hnn_checkpoint", type=str, default='/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt',
                         help="Path to HNN checkpoint for physics-based guidance during sampling")
     parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin"], default="adam",
                         help="HNN guidance method: 'adam' or 'langevin'")
-    parser.add_argument("--guidance_after_steps", type=int, default=175,
+    parser.add_argument("--guidance_after_steps", type=int, default=199,
                         help="Start HNN guidance after this many diffusion steps (0 = from beginning)")
-    parser.add_argument("--guidance_steps", type=int, default=400,
+    parser.add_argument("--guidance_steps", type=int, default=0,
                         help="Number of HNN optimization steps per diffusion step (0 = disabled)")
-    parser.add_argument("--guidance_lr", type=float, default=5e-2,
+    parser.add_argument("--guidance_lr", type=float, default=2e-2,
                         help="Learning rate for adam HNN guidance")
-    parser.add_argument("--langevin_step_size", type=float, default=1e-3,
+    parser.add_argument("--langevin_step_size", type=float, default=2e-4,
                         help="Step size for langevin HNN guidance")
     parser.add_argument("--langevin_noise_scale", type=float, default=0,
                         help="Noise scale for langevin HNN guidance")
-    parser.add_argument("--lambda_init", type=float, default=100,
+    parser.add_argument("--lambda_init", type=float, default=1,
                         help="Weight for initial consistency term in HNN energy")
     parser.add_argument("--seed", type=int, default=228,
                         help="Random seed for reproducible sampling")
