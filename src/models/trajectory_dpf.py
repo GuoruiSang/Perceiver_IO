@@ -40,6 +40,7 @@ from src.training.utils import compute_normalization_stats
 
 from src.models.architectures import TrajectoryOutputAdapter, TrajectoryPerceiverIO, ConditionedTrajectoryPerceiverIO
 import tempfile
+import numpy as np
 
 
 # -------------------------
@@ -1254,10 +1255,36 @@ def main():
             print(f"[Sampling] Guidance enabled: method={args.guidance_method}, after_steps={args.guidance_after_steps}, "
                   f"steps={args.guidance_steps}, lr={args.guidance_lr}")
         
-        # Set seed for reproducibility
-        torch.manual_seed(args.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(args.seed)
+        # Helper function to compute MSE statistics for a set of trajectories
+        def compute_mse_stats(state_tensor, torque_tensor, save_plots=False, params_str=""):
+            mse_qpos_list = []
+            mse_mom_list = []
+            mse_total_list = []
+            
+            for i in range(state_tensor.shape[0]):
+                state_np = state_tensor[i].cpu().numpy()
+                torque_np = torque_tensor[i].cpu().numpy()
+                generated = {
+                    'seq_qpos': state_np[:, :model.qpos_dim],
+                    'seq_mom': state_np[:, model.qpos_dim:],
+                    'seq_torque': torque_np,
+                }
+                mse_dict = compare_generated_with_reconstructed(
+                    generated, '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml',
+                    '/home/gsang/Projects/Perceiver_IO/plots',
+                    dt=float(model.dt),
+                    data_dt=float(model.data_dt),
+                    name=f'{params_str}_{i}' if save_plots else None
+                )
+                mse_qpos_list.append(mse_dict['mse_qpos'])
+                mse_mom_list.append(mse_dict['mse_mom'])
+                mse_total_list.append(mse_dict['mse_total'])
+            
+            return {
+                'qpos': np.array(mse_qpos_list),
+                'mom': np.array(mse_mom_list),
+                'total': np.array(mse_total_list)
+            }
         
         # Load torque from training data if requested
         trained_torque = None
@@ -1267,6 +1294,7 @@ def main():
             
             # Sample random trajectories from dataset and extract their torques
             import random
+            random.seed(args.seed)
             indices = random.sample(range(len(dataset)), min(args.num_samples, len(dataset)))
             torque_list = []
             for idx in indices:
@@ -1275,7 +1303,56 @@ def main():
             
             trained_torque = torch.stack(torque_list).to(device)
             print(f"[Sampling] Loaded {len(torque_list)} torque sequences from training data")
-            print(f"[Sampling] Torque shape: {trained_torque.shape}")
+        
+        # Build naming strings
+        torque_source = "trained" if args.use_trained_torque else "random"
+        ema_str = "ema" if args.use_ema else "noema"
+        base_params = f"seed{args.seed}_{args.sampler}_diff{args.num_diffusion_steps}_ctx{args.context_fraction}_{ema_str}_cfg{args.guidance_scale}"
+        
+        # ============================================================
+        # STEP 1: Run baseline (no guidance) if guidance is enabled
+        # ============================================================
+        baseline_mse = None
+        shared_torque = trained_torque  # Will store torque from baseline run to reuse
+        
+        if args.guidance_steps > 0:
+            print(f"\n[Step 1/2] Generating BASELINE trajectories (no guidance)...")
+            
+            # Set seed for reproducibility
+            torch.manual_seed(args.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(args.seed)
+            
+            state_baseline, torque_baseline = model.sample_trajectories(
+                num_samples=args.num_samples,
+                trajectory_length=trajectory_length,
+                num_diffusion_steps=args.num_diffusion_steps,
+                context_fraction=args.context_fraction,
+                use_ema=args.use_ema,
+                sampler=args.sampler,
+                guidance_scale=args.guidance_scale,
+                hnn=None,  # No HNN guidance
+                guidance_steps=0,
+                torque=trained_torque,
+            )
+            
+            # Store torque from baseline to reuse in guided run (ensures same torque)
+            shared_torque = torque_baseline
+            
+            # Compute baseline MSE (no plots)
+            print("[Step 1/2] Computing baseline MSE...")
+            baseline_mse = compute_mse_stats(state_baseline, torque_baseline, save_plots=False)
+        
+        # ============================================================
+        # STEP 2: Run with guidance (or just regular sampling if no guidance)
+        # ============================================================
+        if args.guidance_steps > 0:
+            print(f"\n[Step 2/2] Generating GUIDED trajectories ({args.guidance_method})...")
+        
+        # Set seed again for reproducibility (same diffusion noise)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
         
         state, torque = model.sample_trajectories(
             num_samples=args.num_samples,
@@ -1294,15 +1371,10 @@ def main():
             langevin_noise_scale=args.langevin_noise_scale,
             lambda_init=args.lambda_init,
             chunk_length=args.chunk_length,
-            torque=trained_torque,  # Use training data torque if --use_trained_torque is set
+            torque=shared_torque,  # Use same torque as baseline
         )
         
-        # Compare all trajectories with physics reconstruction
-        # Build descriptive name with inference parameters for reproducibility
-        torque_source = "trained" if args.use_trained_torque else "random"
-        ema_str = "ema" if args.use_ema else "noema"
-        
-        # Build guidance string based on method
+        # Build guidance string for naming
         if args.guidance_steps > 0:
             if args.guidance_method == "adam":
                 guidance_str = f"hnn-{args.guidance_method}_after{args.guidance_after_steps}_steps{args.guidance_steps}_lr{args.guidance_lr}_lambda{args.lambda_init}"
@@ -1313,63 +1385,43 @@ def main():
         else:
             guidance_str = "hnn-off"
         
-        params_str = (
-            f"seed{args.seed}_"
-            f"{args.sampler}_"
-            f"diff{args.num_diffusion_steps}_"
-            f"ctx{args.context_fraction}_"
-            f"{ema_str}_"
-            f"cfg{args.guidance_scale}_"
-            f"{guidance_str}_"
-            f"len{trajectory_length}_"
-            f"torque-{torque_source}"
-        )
+        params_str = f"{base_params}_{guidance_str}_len{trajectory_length}_torque-{torque_source}"
         
-        print(f"[Sampling] Saving comparison plots for {args.num_samples} samples...")
-        print(f"[Sampling] Plot name format: {params_str}_<idx>.jpg")
+        # Compute guided MSE and save plots
+        print(f"\nSaving comparison plots...")
+        guided_mse = compute_mse_stats(state, torque, save_plots=True, params_str=params_str)
         
-        # Collect MSE statistics
-        mse_qpos_list = []
-        mse_mom_list = []
-        mse_total_list = []
+        # ============================================================
+        # Print MSE Results
+        # ============================================================
+        print(f"\n{'='*70}")
+        print(f"  MSE RESULTS: Physics Reconstruction Error (Generated vs MuJoCo)")
+        print(f"{'='*70}")
+        print(f"  Seed: {args.seed}  |  Samples: {args.num_samples}  |  Length: {trajectory_length}")
+        print(f"{'='*70}")
         
-        for i in range(args.num_samples):
-            state_np = state[i].cpu().numpy()
-            torque_np = torque[i].cpu().numpy()
-            generated = {
-                'seq_qpos': state_np[:, :model.qpos_dim],
-                'seq_mom': state_np[:, model.qpos_dim:],
-                'seq_torque': torque_np,
-            }
-            mse_dict = compare_generated_with_reconstructed(
-                generated, '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml',
-                '/home/gsang/Projects/Perceiver_IO/plots',
-                dt=float(model.dt),
-                data_dt=float(model.data_dt),
-                name=f'{params_str}_{i}'
-            )
-            mse_qpos_list.append(mse_dict['mse_qpos'])
-            mse_mom_list.append(mse_dict['mse_mom'])
-            mse_total_list.append(mse_dict['mse_total'])
+        if baseline_mse is not None:
+            # Show comparison
+            print(f"\n  {'Metric':<12} {'Baseline':>14} {'Guided':>14} {'Improvement':>14} {'% Improv':>10}")
+            print(f"  {'-'*64}")
+            
+            for metric in ['qpos', 'mom', 'total']:
+                base_mean = baseline_mse[metric].mean()
+                guid_mean = guided_mse[metric].mean()
+                improvement = base_mean - guid_mean
+                pct_improv = (improvement / base_mean) * 100 if base_mean > 0 else 0
+                
+                print(f"  MSE {metric:<7} {base_mean:>14.6f} {guid_mean:>14.6f} {improvement:>+14.6f} {pct_improv:>+9.1f}%")
+            
+            print(f"\n  Guidance: {guidance_str}")
+        else:
+            # No guidance, just show results
+            print(f"\n  {'Metric':<12} {'Mean':>14} {'Std':>14}")
+            print(f"  {'-'*42}")
+            for metric in ['qpos', 'mom', 'total']:
+                print(f"  MSE {metric:<7} {guided_mse[metric].mean():>14.6f} {guided_mse[metric].std():>14.6f}")
         
-        print(f"[Sampling] Saved {args.num_samples} comparison plots to /home/gsang/Projects/Perceiver_IO/plots/")
-        
-        # Print MSE statistics
-        import numpy as np
-        mse_qpos_arr = np.array(mse_qpos_list)
-        mse_mom_arr = np.array(mse_mom_list)
-        mse_total_arr = np.array(mse_total_list)
-        
-        print(f"\n{'='*60}")
-        print(f"[MSE Statistics] Physics Reconstruction Error (Generated vs MuJoCo)")
-        print(f"{'='*60}")
-        print(f"  Guidance: {guidance_str}")
-        print(f"  Samples:  {args.num_samples}")
-        print(f"  -" * 30)
-        print(f"  MSE qpos:  mean={mse_qpos_arr.mean():.6f}, std={mse_qpos_arr.std():.6f}")
-        print(f"  MSE mom:   mean={mse_mom_arr.mean():.6f}, std={mse_mom_arr.std():.6f}")
-        print(f"  MSE total: mean={mse_total_arr.mean():.6f}, std={mse_total_arr.std():.6f}")
-        print(f"{'='*60}\n")
+        print(f"{'='*70}\n")
         
         # Save to h5
         state_all = state.cpu().numpy()

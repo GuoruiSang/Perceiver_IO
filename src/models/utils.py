@@ -798,7 +798,7 @@ def run_adam_optimization_hnn(
     return new_x
 
 def compare_generated_with_reconstructed(
-    generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, data_dt: float = None, name: str = 'comparison'
+    generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, data_dt: float = None, name: str = None
 ) -> dict:
     """
     Compare generated trajectory with physics-reconstructed trajectory.
@@ -812,7 +812,7 @@ def compare_generated_with_reconstructed(
         save_path: Directory to save comparison plot
         dt: Fine simulation timestep
         data_dt: Data collection timestep (default: dt for backwards compatibility)
-        name: Name for the output file
+        name: Name for the output file (if None, skip plotting)
     
     Returns:
         dict with MSE values: {'mse_qpos': float, 'mse_mom': float, 'mse_total': float}
@@ -852,30 +852,30 @@ def compare_generated_with_reconstructed(
     mse_mom = np.mean((gen['seq_mom'][1:] - recon['seq_mom']) ** 2)
     mse_total = mse_qpos + mse_mom
     
-    # Plot: generated[1:] vs reconstructed (both have length T-1)
-    keys = ['seq_qpos', 'seq_mom', 'seq_torque']
-    nrows, ncols = len(keys), max(v.shape[-1] for v in gen.values())
-    fig, axes = plt.subplots(nrows, ncols, figsize=(30, 10))
-    
-    # Add MSE info to the figure title
-    fig.suptitle(f'MSE: qpos={mse_qpos:.6f}, mom={mse_mom:.6f}, total={mse_total:.6f}', fontsize=14, y=1.02)
-    
-    for i, key in enumerate(keys):
-        gen_data, recon_data = gen[key][1:], recon[key]  # Align: generated[1:] vs reconstructed
-        t = np.arange(len(gen_data))
-        for j in range(gen_data.shape[-1]):
-            if j < ncols:
-                axes[i, j].scatter(t, gen_data[:, j], s=1, c='blue', label='Generated', alpha=0.7)
-                axes[i, j].scatter(t, recon_data[:, j], s=1, c='red', label='Reconstructed', alpha=0.7)
-                axes[i, j].set_title(f'{key}[{j}]')
-                axes[i, j].legend(markerscale=5)
-        for j in range(gen_data.shape[-1], ncols):
-            axes[i, j].set_visible(False)
-    
-    fig.tight_layout()
-    fig.savefig(os.path.join(save_path, f'{name}.jpg'), bbox_inches='tight')
-    plt.close(fig)
-    print(f"[Comparison] Saved to {os.path.join(save_path, name + '.jpg')}")
+    # Only create plot if name is provided
+    if name is not None:
+        keys = ['seq_qpos', 'seq_mom', 'seq_torque']
+        nrows, ncols = len(keys), max(v.shape[-1] for v in gen.values())
+        fig, axes = plt.subplots(nrows, ncols, figsize=(30, 10))
+        
+        # Add MSE info to the figure title
+        fig.suptitle(f'MSE: qpos={mse_qpos:.6f}, mom={mse_mom:.6f}, total={mse_total:.6f}', fontsize=14, y=1.02)
+        
+        for i, key in enumerate(keys):
+            gen_data, recon_data = gen[key][1:], recon[key]  # Align: generated[1:] vs reconstructed
+            t = np.arange(len(gen_data))
+            for j in range(gen_data.shape[-1]):
+                if j < ncols:
+                    axes[i, j].scatter(t, gen_data[:, j], s=1, c='blue', label='Generated', alpha=0.7)
+                    axes[i, j].scatter(t, recon_data[:, j], s=1, c='red', label='Reconstructed', alpha=0.7)
+                    axes[i, j].set_title(f'{key}[{j}]')
+                    axes[i, j].legend(markerscale=5)
+            for j in range(gen_data.shape[-1], ncols):
+                axes[i, j].set_visible(False)
+        
+        fig.tight_layout()
+        fig.savefig(os.path.join(save_path, f'{name}.jpg'), bbox_inches='tight')
+        plt.close(fig)
     
     return {'mse_qpos': mse_qpos, 'mse_mom': mse_mom, 'mse_total': mse_total}
 
