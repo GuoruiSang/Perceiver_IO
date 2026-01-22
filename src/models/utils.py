@@ -576,7 +576,7 @@ def central_difference(seq: torch.Tensor, dt: float) -> torch.Tensor:
     Args:
         seq: [B, T, dim] sequence
         dt: timestep
-    
+        
     Returns:
         seq_dot: [B, T, dim] time derivative
     """
@@ -799,7 +799,7 @@ def run_adam_optimization_hnn(
 
 def compare_generated_with_reconstructed(
     generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, data_dt: float = None, name: str = 'comparison'
-):
+) -> dict:
     """
     Compare generated trajectory with physics-reconstructed trajectory.
     
@@ -813,6 +813,9 @@ def compare_generated_with_reconstructed(
         dt: Fine simulation timestep
         data_dt: Data collection timestep (default: dt for backwards compatibility)
         name: Name for the output file
+    
+    Returns:
+        dict with MSE values: {'mse_qpos': float, 'mse_mom': float, 'mse_total': float}
     """
     import mujoco
     
@@ -843,10 +846,19 @@ def compare_generated_with_reconstructed(
         data_dt=data_dt
     )
     
+    # Compute MSE between generated and reconstructed trajectories
+    # Align: generated[1:] vs reconstructed (both have length T-1)
+    mse_qpos = np.mean((gen['seq_qpos'][1:] - recon['seq_qpos']) ** 2)
+    mse_mom = np.mean((gen['seq_mom'][1:] - recon['seq_mom']) ** 2)
+    mse_total = mse_qpos + mse_mom
+    
     # Plot: generated[1:] vs reconstructed (both have length T-1)
     keys = ['seq_qpos', 'seq_mom', 'seq_torque']
     nrows, ncols = len(keys), max(v.shape[-1] for v in gen.values())
     fig, axes = plt.subplots(nrows, ncols, figsize=(30, 10))
+    
+    # Add MSE info to the figure title
+    fig.suptitle(f'MSE: qpos={mse_qpos:.6f}, mom={mse_mom:.6f}, total={mse_total:.6f}', fontsize=14, y=1.02)
     
     for i, key in enumerate(keys):
         gen_data, recon_data = gen[key][1:], recon[key]  # Align: generated[1:] vs reconstructed
@@ -861,9 +873,11 @@ def compare_generated_with_reconstructed(
             axes[i, j].set_visible(False)
     
     fig.tight_layout()
-    fig.savefig(os.path.join(save_path, f'{name}.jpg'))
+    fig.savefig(os.path.join(save_path, f'{name}.jpg'), bbox_inches='tight')
     plt.close(fig)
     print(f"[Comparison] Saved to {os.path.join(save_path, name + '.jpg')}")
+    
+    return {'mse_qpos': mse_qpos, 'mse_mom': mse_mom, 'mse_total': mse_total}
 
 
 def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array, data_dt: float = None):
@@ -949,7 +963,6 @@ def reconstruct_traj_with_momentum(model, num_steps: int, dt: float, initial_qpo
         initial_qpos: Initial position
         initial_qvel: Initial velocity
         seq_torque: Torque sequence at data_dt resolution (num_steps, torque_dim)
-                   Each torque is held constant for skip_steps simulation steps
         data_dt: Data collection timestep (default: dt for backwards compatibility)
     
     Returns:
@@ -999,6 +1012,166 @@ def reconstruct_traj_with_momentum(model, num_steps: int, dt: float, initial_qpo
 
     return traj_recon
 
+def compute_chunked_integration_energy(
+    seq_qpos: torch.Tensor,
+    seq_mom: torch.Tensor,
+    seq_torque: torch.Tensor,
+    hnn: nn.Module,
+    dt: float,
+    chunk_length: int,
+) -> torch.Tensor:
+    """
+    Compute integration energy over random chunks of the trajectory.
+    
+    This evaluates how well the HNN integrator can predict the trajectory over
+    short horizons (chunk_length), which is more stable than full-trajectory integration
+    and avoids boundary artifacts by using random chunks.
+    
+    Args:
+        seq_qpos: [B, T, qpos_dim] position trajectory
+        seq_mom: [B, T, mom_dim] momentum trajectory
+        seq_torque: [B, T, torque_dim] torque sequence
+        hnn: HNNWrapper model
+        dt: timestep
+        chunk_length: length of integration chunks
+        
+    Returns:
+        energy: scalar mean squared error between integrated and actual chunks
+    """
+    B, T, _ = seq_qpos.shape
+    
+    # Ensure we can fit at least one chunk
+    if T <= chunk_length:
+        raise ValueError(f"Trajectory length {T} must be greater than chunk_length {chunk_length}")
+    
+    # Select random start indices for each batch element
+    # Valid start range: [0, T - chunk_length - 1]
+    # We need T-chunk_length-1 because integration produces chunk_length+1 states (including t=0)
+    max_start = T - chunk_length - 1
+    start_indices = torch.randint(0, max_start + 1, (B,), device=seq_qpos.device)
+    
+    # Gather initial conditions and ground truth chunks
+    # We need to extract [start:start+chunk_length+1] for comparison
+    
+    # Helper to gather chunks: [B, chunk_len+1, dim]
+    def gather_chunks(tensor, starts, length):
+        batch_indices = torch.arange(B, device=tensor.device).unsqueeze(1)
+        time_indices = starts.unsqueeze(1) + torch.arange(length + 1, device=tensor.device).unsqueeze(0)
+        return tensor[batch_indices, time_indices]
+    
+    qpos_chunk_gt = gather_chunks(seq_qpos, start_indices, chunk_length)
+    mom_chunk_gt = gather_chunks(seq_mom, start_indices, chunk_length)
+    torque_chunk = gather_chunks(seq_torque, start_indices, chunk_length) # Torque needs to cover integration steps
+    
+    # Initial state for integration
+    q0 = qpos_chunk_gt[:, 0, :]
+    p0 = mom_chunk_gt[:, 0, :]
+    
+    # Torque sequence for integration: [chunk_length, B, dim]
+    # We take the first chunk_length torques (t=0 to t=chunk_length-1)
+    tau_seq = torque_chunk[:, :-1, :].permute(1, 0, 2)
+    
+    # Integrate forward
+    # Returns trajectories of shape [chunk_length+1, B, dim]
+    p_traj, q_traj, _ = hnn.integrate_trajectory(p0, q0, tau_seq, dt, chunk_length)
+    
+    # Permute back to [B, chunk_length+1, dim] for comparison
+    p_traj = p_traj.permute(1, 0, 2)
+    q_traj = q_traj.permute(1, 0, 2)
+    
+    # Compute MSE loss (energy)
+    # We compare the whole chunk including t=0 (which should be 0 error) and t=chunk_length
+    loss_q = nn.functional.mse_loss(q_traj, qpos_chunk_gt)
+    loss_p = nn.functional.mse_loss(p_traj, mom_chunk_gt)
+    
+    return loss_q + loss_p
 
-# Legacy test code removed - uses old data format (qvel, qacc) instead of new format (mom)
 
+def run_adam_optimization_hnn_integration(
+    x: torch.Tensor,
+    seq_torque: torch.Tensor,
+    qpos_dim: int,
+    mom_dim: int,
+    dt: float,
+    hnn: nn.Module,
+    num_steps: int,
+    lr: float = 1e-3,
+    betas: tuple = (0.9, 0.999),
+    eps: float = 1e-8,
+    chunk_length: int = 15,
+    lambda_init: float = 1.0,
+) -> torch.Tensor:
+    """
+    Optimize trajectory using Adam with HNN integration-based energy (shooting method).
+    
+    This uses chunked integration (k-step shooting) instead of derivative matching,
+    which enforces causal consistency over short horizons. Each optimization step
+    uses randomized chunk positions to avoid boundary artifacts.
+    
+    Args:
+        x: State tensor [B, T, qpos_dim + mom_dim] with structure [qpos | mom]
+        seq_torque: Torque conditioning [B, T, torque_dim] (fixed, not optimized)
+        qpos_dim: Dimension of position
+        mom_dim: Dimension of momentum
+        dt: Timestep for integration
+        hnn: Trained Hamiltonian Neural Network (HNNWrapper)
+        num_steps: Number of optimization steps
+        lr: Learning rate for Adam optimizer
+        betas: Coefficients for running averages
+        eps: Numerical stability term
+        chunk_length: Length of integration chunks (default: 15)
+        lambda_init: Weight for regularization term (keeping trajectory close to initial)
+    
+    Returns:
+        Optimized state tensor [B, T, qpos_dim + mom_dim]
+    """
+    B, T, _ = x.shape
+    
+    # Validate chunk length
+    if T <= chunk_length:
+        print(f"[Warning] Trajectory length {T} <= chunk_length {chunk_length}, falling back to derivative matching")
+        # Fall back to derivative-based method
+        return run_adam_optimization_hnn(
+            x, seq_torque, qpos_dim, mom_dim, dt, hnn, num_steps, lr, betas, eps, lambda_init
+        )
+    
+    # Store initial trajectory for regularization (before optimization)
+    seq_qpos_init = x[:, :, :qpos_dim].detach().clone()
+    seq_mom_init = x[:, :, qpos_dim:qpos_dim + mom_dim].detach().clone()
+    
+    seq_qpos = nn.Parameter(x[:, :, :qpos_dim].clone())
+    seq_mom = nn.Parameter(x[:, :, qpos_dim:qpos_dim + mom_dim].clone())
+
+    optimizer = torch.optim.Adam(
+        [seq_qpos, seq_mom],
+        lr=lr,
+        betas=betas,
+        eps=eps
+    )
+
+    for i in trange(num_steps, desc='Running Adam Integration Optimization'):
+        optimizer.zero_grad()
+        
+        # Compute integration energy with random chunks
+        # Each step uses different random chunk positions (sliding window effect)
+        integration_energy = compute_chunked_integration_energy(
+            seq_qpos, seq_mom, seq_torque, hnn, dt, chunk_length
+        )
+        
+        # Regularization: keep trajectory close to initial prediction
+        reg_qpos = nn.functional.mse_loss(seq_qpos, seq_qpos_init)
+        reg_mom = nn.functional.mse_loss(seq_mom, seq_mom_init)
+        reg_energy = reg_qpos + reg_mom
+        
+        # Total energy
+        energy = integration_energy + lambda_init * reg_energy
+        
+        if i == 0 or i == num_steps - 1:
+            print(f'Integration Energy: {energy.item():.6f} (shooting={integration_energy.item():.6f}, reg={reg_energy.item():.6f}, lambda={lambda_init})')
+        
+        energy.backward()
+        optimizer.step()
+
+    new_x = torch.cat([seq_qpos.data, seq_mom.data], dim=-1)
+
+    return new_x

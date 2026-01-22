@@ -172,7 +172,7 @@ class TrajectoryDPF(pl.LightningModule):
         num_latent_channels: int = 256,
         cond_dim: int = 256,  # Dimension of conditioning embeddings
         num_decoder_blocks: int = 0,  # NEW: Number of decoder self-attention blocks
-        context_fraction_range: Tuple[float, float] = (0.3, 0.7),
+        trajectory_length_training_options: Tuple[int, ...] = (100, 200, 300, 400, 500, 600, 700, 800, 900, 1000),
         lr: float = 1e-4,
         use_ema: bool = True,
         p_uncond: float = 0.1,  # Probability of dropping conditioning for CFG
@@ -201,7 +201,7 @@ class TrajectoryDPF(pl.LightningModule):
         self.num_decoder_blocks = num_decoder_blocks
         self.max_timesteps = max_timesteps
         self.diffusion_steps = diffusion_steps
-        self.context_fraction_range = context_fraction_range
+        self.trajectory_length_training_options = trajectory_length_training_options
         self.lr = lr
         self.p_uncond = p_uncond  # CFG dropout probability
         self.lambda_cond = lambda_cond  # Conditioning regularization weight
@@ -525,12 +525,21 @@ class TrajectoryDPF(pl.LightningModule):
         
         B, T, _ = state.shape
         
+        # Sample trajectory length uniformly from training options
+        T_train = self.trajectory_length_training_options[
+            torch.randint(0, len(self.trajectory_length_training_options), (1,)).item()
+        ]
+        T_train = min(T_train, T)  # Clamp to actual batch length
+        
+        # Crop to first T_train timesteps
+        state = state[:, :T_train, :]
+        torque = torque[:, :T_train, :]
+        
         # Random diffusion timestep
         diffusion_t = torch.randint(1, self.diffusion_steps + 1, (1,)).item()
         
-        # PREFIX context selection (not random) for extension capability
-        context_fraction = torch.empty(1).uniform_(*self.context_fraction_range).item()
-        num_context = max(1, min(T - 1, int(T * context_fraction)))
+        # Sample context length uniformly from [1, T_train-1]
+        num_context = torch.randint(1, T_train, (1,)).item()
         
         # Build full token array once (NO torque in tokens), then apply noise once.
         # IMPORTANT: keep contexts as a slice of the (noisy) queries so training matches sampling
@@ -564,6 +573,10 @@ class TrajectoryDPF(pl.LightningModule):
         # Log training loss (step-level only)
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=False, sync_dist=True)
         self.log('denoise_loss', loss_denoise, prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        
+        # Log trajectory length and context length for debugging
+        self.log('T_train', float(T_train), prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log('num_context', float(num_context), prog_bar=False, on_step=True, on_epoch=False, sync_dist=True)
         
         return loss
     
@@ -798,6 +811,7 @@ class TrajectoryDPF(pl.LightningModule):
         langevin_step_size: float = 1e-5,
         langevin_noise_scale: float = 1e-6,
         lambda_init: float = 1.0,  # Weight for initial consistency term
+        chunk_length: int = 15,  # Chunk length for integration-based guidance
         dt: Optional[float] = None,
         # Torque generation parameters
         torque: torch.Tensor = None,  # Optional: provide torque directly
@@ -818,13 +832,14 @@ class TrajectoryDPF(pl.LightningModule):
             sampler: sampling method ('ddpm', 'ddim', or 'ddpm_legacy')
             guidance_scale: CFG scale (1.0 = no CFG, >1.0 = stronger conditioning)
             hnn: HNN for physics-based guidance
-            guidance_method: 'adam' or 'langevin'
+            guidance_method: 'adam', 'langevin', or 'adam_integration'
             guidance_after_steps: start HNN guidance after this many steps
             guidance_steps: number of HNN optimization steps
             guidance_lr: learning rate for adam guidance
             langevin_step_size: step size for langevin guidance
             langevin_noise_scale: noise scale for langevin guidance
             lambda_init: weight for initial consistency term in HNN energy
+            chunk_length: length of integration chunks for 'adam_integration' method
             dt: timestep used to parameterize random torque generation (seconds between torque samples).
                 If None, defaults to self.data_dt (dataset control timestep).
             torque: optional pre-generated torque [num_samples, trajectory_length, torque_dim]
@@ -834,7 +849,7 @@ class TrajectoryDPF(pl.LightningModule):
                 - state: [num_samples, trajectory_length, state_dim] (qpos, mom)
                 - torque: [num_samples, trajectory_length, torque_dim]
         """
-        from src.models.utils import run_adam_optimization_hnn, run_langevin_dynamics_hnn
+        from src.models.utils import run_adam_optimization_hnn, run_langevin_dynamics_hnn, run_adam_optimization_hnn_integration
         
         self.model.eval()
         
@@ -976,6 +991,12 @@ class TrajectoryDPF(pl.LightningModule):
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale, lambda_init=lambda_init
                         )
+                    elif guidance_method == "adam_integration":
+                        x0_phys = run_adam_optimization_hnn_integration(
+                            x0_phys, torque, self.qpos_dim, self.mom_dim,
+                            self.data_dt, hnn, guidance_steps, guidance_lr,
+                            chunk_length=chunk_length, lambda_init=lambda_init
+                        )
                     x0 = self.normalize_state(x0_phys).detach()
                 
                 eps_coef = torch.sqrt(1.0 - a_bar_prev)
@@ -998,6 +1019,12 @@ class TrajectoryDPF(pl.LightningModule):
                         x0_phys = run_langevin_dynamics_hnn(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale, lambda_init=lambda_init
+                        )
+                    elif guidance_method == "adam_integration":
+                        x0_phys = run_adam_optimization_hnn_integration(
+                            x0_phys, torque, self.qpos_dim, self.mom_dim,
+                            self.data_dt, hnn, guidance_steps, guidance_lr,
+                            chunk_length=chunk_length, lambda_init=lambda_init
                         )
                     x0 = self.normalize_state(x0_phys).detach()
                 
@@ -1121,13 +1148,13 @@ def main():
                         help="Classifier-free guidance scale (1.0 = no CFG, >1.0 = stronger conditioning)")
     parser.add_argument("--hnn_checkpoint", type=str, default='/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt',
                         help="Path to HNN checkpoint for physics-based guidance during sampling")
-    parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin"], default="adam",
-                        help="HNN guidance method: 'adam' or 'langevin'")
-    parser.add_argument("--guidance_after_steps", type=int, default=199,
+    parser.add_argument("--guidance_method", type=str, choices=["adam", "langevin", "adam_integration"], default="adam",
+                        help="HNN guidance method: 'adam', 'langevin', or 'adam_integration' (integration-based)")
+    parser.add_argument("--guidance_after_steps", type=int, default=150,
                         help="Start HNN guidance after this many diffusion steps (0 = from beginning)")
-    parser.add_argument("--guidance_steps", type=int, default=0,
+    parser.add_argument("--guidance_steps", type=int, default=20,
                         help="Number of HNN optimization steps per diffusion step (0 = disabled)")
-    parser.add_argument("--guidance_lr", type=float, default=2e-2,
+    parser.add_argument("--guidance_lr", type=float, default=2e-3,
                         help="Learning rate for adam HNN guidance")
     parser.add_argument("--langevin_step_size", type=float, default=2e-4,
                         help="Step size for langevin HNN guidance")
@@ -1135,6 +1162,8 @@ def main():
                         help="Noise scale for langevin HNN guidance")
     parser.add_argument("--lambda_init", type=float, default=1,
                         help="Weight for initial consistency term in HNN energy")
+    parser.add_argument("--chunk_length", type=int, default=50,
+                        help="Chunk length for integration-based guidance (adam_integration method)")
     parser.add_argument("--seed", type=int, default=228,
                         help="Random seed for reproducible sampling")
     parser.add_argument("--use_trained_torque", action="store_true", default=False,
@@ -1264,6 +1293,7 @@ def main():
             langevin_step_size=args.langevin_step_size,
             langevin_noise_scale=args.langevin_noise_scale,
             lambda_init=args.lambda_init,
+            chunk_length=args.chunk_length,
             torque=trained_torque,  # Use training data torque if --use_trained_torque is set
         )
         
@@ -1276,6 +1306,8 @@ def main():
         if args.guidance_steps > 0:
             if args.guidance_method == "adam":
                 guidance_str = f"hnn-{args.guidance_method}_after{args.guidance_after_steps}_steps{args.guidance_steps}_lr{args.guidance_lr}_lambda{args.lambda_init}"
+            elif args.guidance_method == "adam_integration":
+                guidance_str = f"hnn-{args.guidance_method}_after{args.guidance_after_steps}_steps{args.guidance_steps}_lr{args.guidance_lr}_chunk{args.chunk_length}_lambda{args.lambda_init}"
             else:  # langevin
                 guidance_str = f"hnn-{args.guidance_method}_after{args.guidance_after_steps}_steps{args.guidance_steps}_ss{args.langevin_step_size}_ns{args.langevin_noise_scale}_lambda{args.lambda_init}"
         else:
@@ -1295,6 +1327,12 @@ def main():
         
         print(f"[Sampling] Saving comparison plots for {args.num_samples} samples...")
         print(f"[Sampling] Plot name format: {params_str}_<idx>.jpg")
+        
+        # Collect MSE statistics
+        mse_qpos_list = []
+        mse_mom_list = []
+        mse_total_list = []
+        
         for i in range(args.num_samples):
             state_np = state[i].cpu().numpy()
             torque_np = torque[i].cpu().numpy()
@@ -1303,14 +1341,35 @@ def main():
                 'seq_mom': state_np[:, model.qpos_dim:],
                 'seq_torque': torque_np,
             }
-            compare_generated_with_reconstructed(
+            mse_dict = compare_generated_with_reconstructed(
                 generated, '/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml',
                 '/home/gsang/Projects/Perceiver_IO/plots',
                 dt=float(model.dt),
                 data_dt=float(model.data_dt),
                 name=f'{params_str}_{i}'
             )
+            mse_qpos_list.append(mse_dict['mse_qpos'])
+            mse_mom_list.append(mse_dict['mse_mom'])
+            mse_total_list.append(mse_dict['mse_total'])
+        
         print(f"[Sampling] Saved {args.num_samples} comparison plots to /home/gsang/Projects/Perceiver_IO/plots/")
+        
+        # Print MSE statistics
+        import numpy as np
+        mse_qpos_arr = np.array(mse_qpos_list)
+        mse_mom_arr = np.array(mse_mom_list)
+        mse_total_arr = np.array(mse_total_list)
+        
+        print(f"\n{'='*60}")
+        print(f"[MSE Statistics] Physics Reconstruction Error (Generated vs MuJoCo)")
+        print(f"{'='*60}")
+        print(f"  Guidance: {guidance_str}")
+        print(f"  Samples:  {args.num_samples}")
+        print(f"  -" * 30)
+        print(f"  MSE qpos:  mean={mse_qpos_arr.mean():.6f}, std={mse_qpos_arr.std():.6f}")
+        print(f"  MSE mom:   mean={mse_mom_arr.mean():.6f}, std={mse_mom_arr.std():.6f}")
+        print(f"  MSE total: mean={mse_total_arr.mean():.6f}, std={mse_total_arr.std():.6f}")
+        print(f"{'='*60}\n")
         
         # Save to h5
         state_all = state.cpu().numpy()
@@ -1479,7 +1538,7 @@ def main():
     
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename='trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap&EncoderNone&DecoderAttentions:{epoch:03d}_val_loss:{val_loss:.4f}',
+        filename='trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions:{epoch:03d}_val_loss:{val_loss:.4f}',
         every_n_epochs=10,  # Save checkpoint every 10 epochs
     )
     callbacks.append(checkpoint_callback)

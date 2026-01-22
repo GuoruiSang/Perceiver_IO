@@ -64,7 +64,7 @@ DEFAULT_USE_EMA = False
 DEFAULT_WANDB_ENABLED = True
 DEFAULT_WANDB_PROJECT = "trajectory-dpf-smooth"
 DEFAULT_WANDB_ENTITY = None
-DEFAULT_WANDB_RUN_NAME = 'Position&Momentum|Torque(AdaIN)&StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&ContextLengthCap&EncoderNone&DecoderAttentions'
+DEFAULT_WANDB_RUN_NAME = 'Position&Momentum|Torque(AdaIN)&StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions'
 
 # ===========================
 # Mode Configuration
