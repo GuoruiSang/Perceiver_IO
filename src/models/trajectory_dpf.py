@@ -1169,6 +1169,8 @@ def main():
                         help="Random seed for reproducible sampling")
     parser.add_argument("--use_trained_torque", action="store_true", default=False,
                         help="Use torque sequences from training data instead of generating new random ones")
+    parser.add_argument("--torque_file", type=str, default=None,
+                        help="Path to HDF5 file with pre-generated torque sequences (overrides --use_trained_torque)")
     
     # W&B arguments
     parser.add_argument("--wandb", type=bool, default=config.DEFAULT_WANDB_ENABLED, help="Enable Weights & Biases logging")
@@ -1286,9 +1288,27 @@ def main():
                 'total': np.array(mse_total_list)
             }
         
-        # Load torque from training data if requested
+        # Load torque from file or training data if requested
         trained_torque = None
-        if args.use_trained_torque:
+        torque_source = "random"
+        
+        if args.torque_file:
+            # Load pre-generated torques from HDF5 file
+            print(f"[Sampling] Loading torque sequences from file: {args.torque_file}")
+            with h5py.File(args.torque_file, 'r') as f:
+                torques_np = f['torques'][:]
+                print(f"[Sampling] File contains {torques_np.shape[0]} torque sequences")
+                print(f"[Sampling] File metadata: seed={f.attrs.get('seed', 'N/A')}, dt={f.attrs.get('dt', 'N/A')}")
+                
+                # Select the requested number of samples
+                if args.num_samples > torques_np.shape[0]:
+                    print(f"[Warning] Requested {args.num_samples} samples but file only has {torques_np.shape[0]}. Using all available.")
+                    args.num_samples = torques_np.shape[0]
+                
+                trained_torque = torch.tensor(torques_np[:args.num_samples], dtype=torch.float32, device=device)
+                print(f"[Sampling] Loaded {trained_torque.shape[0]} torque sequences from file")
+            torque_source = "file"
+        elif args.use_trained_torque:
             print(f"[Sampling] Loading torque sequences from training data: {args.h5_path}")
             dataset = TrajectoryDPFCached(args.h5_path, trajectory_length=trajectory_length)
             
@@ -1303,9 +1323,9 @@ def main():
             
             trained_torque = torch.stack(torque_list).to(device)
             print(f"[Sampling] Loaded {len(torque_list)} torque sequences from training data")
+            torque_source = "trained"
         
         # Build naming strings
-        torque_source = "trained" if args.use_trained_torque else "random"
         ema_str = "ema" if args.use_ema else "noema"
         base_params = f"seed{args.seed}_{args.sampler}_diff{args.num_diffusion_steps}_ctx{args.context_fraction}_{ema_str}_cfg{args.guidance_scale}"
         

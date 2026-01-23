@@ -1,0 +1,26 @@
+# FAST Hyperparameter sweep - optimized for speed
+# Uses 100 samples, 50 diffusion steps, reduced param grid
+
+# Test set (100 samples instead of 2000)
+test_set_path: "data/test_torques_100.h5"
+
+# Fixed parameters
+seed: 228
+trajectory_length: 1000
+num_diffusion_steps: 50  # Reduced from 200 (DDIM works well with fewer steps)
+sampler: "ddim"
+context_fraction: 0.5
+use_ema: false
+
+# Stage 1: Skip - we already know best is 1.0 from previous run
+stage1:
+  guidance_scale: [1.0]  # Just verify with the known best
+
+# Stage 2: Reduced parameter grid (36 configs instead of 324)
+stage2:
+  guidance_method: ["adam", "adam_integration"]
+  guidance_steps: [10, 20]           # 2 values (was 3)
+  guidance_lr: [0.001, 0.005]        # 2 values (was 3)
+  guidance_after_steps: [35, 40]     # 2 values, scaled for 50 steps (was 3)
+  chunk_length: [20, 40]             # 2 values (was 3)
+  lambda_init: [0.5, 1.0]            # 2 values (was 3)
