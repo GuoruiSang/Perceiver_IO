@@ -230,7 +230,7 @@ def run_trajectory_length_experiment(
                 num_samples=batch_torques.shape[0],
                 trajectory_length=traj_length,
                 num_diffusion_steps=num_diffusion_steps,
-                context_fraction=0.5,
+                context_fraction=0.2,
                 use_ema=False,
                 sampler='ddim',
                 guidance_scale=1.0,
@@ -264,7 +264,7 @@ def run_trajectory_length_experiment(
                 num_samples=batch_torques.shape[0],
                 trajectory_length=traj_length,
                 num_diffusion_steps=num_diffusion_steps,
-                context_fraction=0.5,
+                context_fraction=0.2,
                 use_ema=False,
                 sampler='ddim',
                 guidance_scale=1.0,
@@ -402,7 +402,8 @@ def main():
     dataset = TrajectoryDPFCached(args.training_data, trajectory_length=1000)
     print(f"  Loaded {len(dataset)} training trajectories")
     
-    # Trajectory lengths to test
+    # Trajectory lengths to test (can be overridden via CLI)
+    # Trained lengths [100, 200, 300, ..., 1000]
     trajectory_lengths = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
     
     # Run experiment
