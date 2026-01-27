@@ -135,55 +135,49 @@ def compute_mse_and_reconstruction(model, state, torque):
     }
 
 
-def select_best_samples(baseline_results, guided_results, n=5):
+def select_best_samples(baseline_results, guided_results, n=3):
     """
     Select n samples that best demonstrate guidance improvement.
 
     Priority:
-    1. Guided MSE should be very low (best overlap)
-    2. Among those, baseline should be decent but not perfect (visible difference)
+    1. Guided MSE should be as low as possible (best overlap)
+    2. Baseline MSE should be above average (visible gap)
     """
     baseline_mses = np.array([r['mse_total'] for r in baseline_results])
     guided_mses = np.array([r['mse_total'] for r in guided_results])
 
     # Compute percentiles
-    guided_p25 = np.percentile(guided_mses, 25)
-    baseline_p25 = np.percentile(baseline_mses, 25)
-    baseline_p75 = np.percentile(baseline_mses, 75)
+    guided_p10 = np.percentile(guided_mses, 10)  # Want very low guided MSE
+    baseline_median = np.percentile(baseline_mses, 50)
 
     # Compute improvement ratio
     improvements = (baseline_mses - guided_mses) / (baseline_mses + 1e-8)
 
-    # Score: PRIORITY is low guided MSE, then baseline should be visible but not too bad
+    # Score: PRIORITY is low guided MSE, baseline should be above average
     scores = []
     for i in range(len(baseline_mses)):
-        # Primary: guided MSE should be very low (top 25%)
-        if guided_mses[i] <= guided_p25:
-            guided_score = 1.0 - guided_mses[i] / (guided_p25 + 1e-8) * 0.5
+        # Primary: guided MSE should be very low (top 10%)
+        if guided_mses[i] <= guided_p10:
+            guided_score = 1.0
         else:
-            guided_score = 0.3  # Penalize high guided MSE
+            guided_score = guided_p10 / (guided_mses[i] + 1e-8)  # Penalize higher guided MSE
 
-        # Secondary: baseline should be decent but show room for improvement
-        # Prefer baseline between 25th-75th percentile (not too good, not too bad)
-        if baseline_p25 <= baseline_mses[i] <= baseline_p75:
-            baseline_score = 0.8
-        elif baseline_mses[i] < baseline_p25:
-            # Too good baseline - less visible improvement
-            baseline_score = 0.5
+        # Secondary: baseline should be above average (visible gap)
+        if baseline_mses[i] >= baseline_median:
+            baseline_score = 1.0  # Above average - good for showing improvement
         else:
-            # High baseline MSE - still ok if guided is good
-            baseline_score = 0.6
+            baseline_score = 0.3  # Below average - less visible improvement
 
-        # Require significant improvement
-        if improvements[i] > 0.7:
+        # Require high improvement
+        if improvements[i] > 0.9:
             improvement_score = 1.0
-        elif improvements[i] > 0.5:
+        elif improvements[i] > 0.7:
             improvement_score = 0.7
         else:
             improvement_score = 0.2
 
-        # Combined score - guided quality is most important
-        score = guided_score * 0.5 + baseline_score * 0.2 + improvement_score * 0.3
+        # Combined score - guided quality is most important, then baseline visibility
+        score = guided_score * 0.5 + baseline_score * 0.3 + improvement_score * 0.2
         scores.append((i, score, baseline_mses[i], guided_mses[i], improvements[i]))
 
     # Sort by score (descending) and select top n
@@ -200,13 +194,23 @@ def select_best_samples(baseline_results, guided_results, n=5):
 
 
 def create_comparison_figure(baseline_results, guided_results, selected_indices, output_path):
-    """Create the 10x6 comparison figure with alternating baseline/guided rows."""
+    """Create comparison figure with clear separation between sample pairs."""
 
     n_samples = len(selected_indices)
-    n_rows = n_samples * 2  # baseline + guided (alternating)
     n_cols = 6  # qpos[0-2] + mom[0-2]
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 2.2 * n_rows))
+    # Use GridSpec for custom spacing - larger gap between comparisons
+    fig = plt.figure(figsize=(14, 2.5 * n_samples * 2))
+
+    # Height ratios: each pair gets 2 rows, with extra space between pairs
+    height_ratios = []
+    for i in range(n_samples):
+        height_ratios.extend([1, 1])  # baseline, guided
+        if i < n_samples - 1:
+            height_ratios.append(0.3)  # spacer between comparisons
+
+    gs = fig.add_gridspec(len(height_ratios), n_cols, height_ratios=height_ratios,
+                          hspace=0.1, wspace=0.25)
 
     dim_names = ['qpos[0]', 'qpos[1]', 'qpos[2]', 'mom[0]', 'mom[1]', 'mom[2]']
 
@@ -214,20 +218,27 @@ def create_comparison_figure(baseline_results, guided_results, selected_indices,
         baseline = baseline_results[data_idx]
         guided = guided_results[data_idx]
 
-        # Alternating rows: baseline, guided, baseline, guided, ...
-        row_baseline = sample_idx * 2      # rows 0, 2, 4, 6, 8
-        row_guided = sample_idx * 2 + 1    # rows 1, 3, 5, 7, 9
+        # Calculate actual row indices accounting for spacers
+        base_row = sample_idx * 3 if sample_idx > 0 else 0
+        if sample_idx > 0:
+            base_row = sample_idx * 2 + sample_idx  # 0, 3, 6 for samples 0, 1, 2
+        else:
+            base_row = 0
+
+        row_baseline = base_row
+        row_guided = base_row + 1
+
+        axes_baseline = [fig.add_subplot(gs[row_baseline, col]) for col in range(n_cols)]
+        axes_guided = [fig.add_subplot(gs[row_guided, col]) for col in range(n_cols)]
 
         for col in range(n_cols):
             # Determine which data to plot
             if col < 3:
-                # qpos dimensions
                 gen_baseline = baseline['generated']['seq_qpos'][1:, col]
                 rec_baseline = baseline['reconstructed']['seq_qpos'][:, col]
                 gen_guided = guided['generated']['seq_qpos'][1:, col]
                 rec_guided = guided['reconstructed']['seq_qpos'][:, col]
             else:
-                # mom dimensions
                 mom_col = col - 3
                 gen_baseline = baseline['generated']['seq_mom'][1:, mom_col]
                 rec_baseline = baseline['reconstructed']['seq_mom'][:, mom_col]
@@ -242,101 +253,61 @@ def create_comparison_figure(baseline_results, guided_results, selected_indices,
             y_margin = (y_max - y_min) * 0.05
             y_lim = (y_min - y_margin, y_max + y_margin)
 
-            # Plot baseline row
-            ax_base = axes[row_baseline, col]
+            # Plot baseline row - light gray background
+            ax_base = axes_baseline[col]
+            ax_base.set_facecolor('#f0f0f0')
             ax_base.scatter(t, gen_baseline, s=0.3, c='#1f77b4', alpha=0.7, label='Generated')
             ax_base.scatter(t, rec_baseline, s=0.3, c='#d62728', alpha=0.7, label='Reconstructed')
             ax_base.set_ylim(y_lim)
+            ax_base.set_xticklabels([])
 
-            # Plot guided row
-            ax_guided = axes[row_guided, col]
+            # Plot guided row - white background
+            ax_guided = axes_guided[col]
+            ax_guided.set_facecolor('white')
             ax_guided.scatter(t, gen_guided, s=0.3, c='#1f77b4', alpha=0.7, label='Generated')
             ax_guided.scatter(t, rec_guided, s=0.3, c='#d62728', alpha=0.7, label='Reconstructed')
             ax_guided.set_ylim(y_lim)
 
-            # Column titles (only on first row)
-            if sample_idx == 0:
-                ax_base.set_title(dim_names[col])
-
-            # Remove x-axis labels except bottom row
-            if row_baseline != n_rows - 2:
-                ax_base.set_xticklabels([])
-            if row_guided != n_rows - 1:
+            # Only show x-axis labels on bottom row of last comparison
+            if sample_idx != n_samples - 1:
                 ax_guided.set_xticklabels([])
 
-        # Row labels with MSE
-        axes[row_baseline, 0].set_ylabel(
-            f'Baseline #{sample_idx+1}\nMSE={baseline["mse_total"]:.4f}',
-            fontsize=8
-        )
-        axes[row_guided, 0].set_ylabel(
-            f'Guided #{sample_idx+1}\nMSE={guided["mse_total"]:.4f}',
-            fontsize=8
-        )
+            # Column titles (only on first row)
+            if sample_idx == 0:
+                ax_base.set_title(dim_names[col], fontsize=10)
 
-    # Add legend to first subplot
+        # Row labels
+        axes_baseline[0].set_ylabel(f'w/o Guidance\nMSE={baseline["mse_total"]:.4f}',
+                                     fontsize=9, fontweight='bold')
+        axes_guided[0].set_ylabel(f'w/ Guidance\nMSE={guided["mse_total"]:.4f}',
+                                   fontsize=9, fontweight='bold')
+
+        # Add comparison label on the right
+        fig.text(0.995, (row_baseline + 1) / len(height_ratios),
+                 f'Sample {sample_idx+1}', ha='right', va='center',
+                 fontsize=11, fontweight='bold', rotation=-90,
+                 transform=fig.transFigure)
+
+    # Add legend
     handles = [
         plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#1f77b4', markersize=5, label='Generated'),
         plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='#d62728', markersize=5, label='Reconstructed'),
     ]
-    axes[0, n_cols-1].legend(handles=handles, loc='upper right', framealpha=0.9)
+    fig.legend(handles=handles, loc='upper right', bbox_to_anchor=(0.99, 0.99), framealpha=0.9)
 
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.1)
     plt.close()
     print(f"\nFigure saved to: {output_path}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Trajectory Comparison Visualization")
-    parser.add_argument("--test_torques", type=str, default="data/test_torques_2000.h5",
-                        help="Path to test torques HDF5 file")
-    parser.add_argument("--num_samples", type=int, default=2000,
-                        help="Number of samples to generate")
-    parser.add_argument("--batch_size", type=int, default=200,
-                        help="Batch size for sampling")
-    parser.add_argument("--trajectory_length", type=int, default=1000,
-                        help="Trajectory length")
-    parser.add_argument("--num_diffusion_steps", type=int, default=50,
-                        help="Number of diffusion steps")
-    parser.add_argument("--checkpoint", type=str,
-                        default="/home/gsang/Projects/Perceiver_IO/checkpoints/trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions:epoch=2999_val_loss:val_loss=0.0010.ckpt",
-                        help="Path to model checkpoint")
-    parser.add_argument("--hnn_checkpoint", type=str,
-                        default="/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt",
-                        help="Path to HNN checkpoint")
-    parser.add_argument("--output_dir", type=str, default="plots",
-                        help="Output directory for figure")
-    parser.add_argument("--n_display", type=int, default=5,
-                        help="Number of trajectories to display")
-
-    # Guidance config
-    parser.add_argument("--guidance_steps", type=int, default=25)
-    parser.add_argument("--guidance_lr", type=float, default=0.01)
-    parser.add_argument("--guidance_after_steps", type=int, default=45)
-
-    args = parser.parse_args()
-
-    # Setup
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    # Load model and HNN
-    model, hnn = load_model_and_hnn(args.checkpoint, args.hnn_checkpoint, device)
-
-    # Load test torques
-    torque_path = project_root / args.test_torques
-    torques = load_test_torques(str(torque_path), device)
+def generate_and_evaluate_for_length(model, hnn, torques, traj_length, args, device, seed=228):
+    """Generate baseline and guided trajectories for a specific length and compute MSE."""
 
     # Truncate torques to trajectory length
-    traj_torques = torques[:args.num_samples, :args.trajectory_length, :]
-
-    seed = 228
+    traj_torques = torques[:args.num_samples, :traj_length, :]
 
     # Generate baseline trajectories (no guidance)
-    print("\nGenerating baseline trajectories (no guidance)...")
+    print(f"\n[Length={traj_length}] Generating baseline trajectories (no guidance)...")
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
@@ -344,13 +315,13 @@ def main():
     baseline_states = []
     baseline_torques_out = []
 
-    for batch_start in tqdm(range(0, args.num_samples, args.batch_size), desc="Baseline"):
+    for batch_start in tqdm(range(0, args.num_samples, args.batch_size), desc=f"Baseline L={traj_length}"):
         batch_end = min(batch_start + args.batch_size, args.num_samples)
         batch_torques = traj_torques[batch_start:batch_end]
 
         state, torque_out = model.sample_trajectories(
             num_samples=batch_torques.shape[0],
-            trajectory_length=args.trajectory_length,
+            trajectory_length=traj_length,
             num_diffusion_steps=args.num_diffusion_steps,
             context_fraction=0.2,
             use_ema=False,
@@ -367,7 +338,7 @@ def main():
     baseline_torque = torch.cat(baseline_torques_out, dim=0)
 
     # Generate guided trajectories (same seed, same torque)
-    print("\nGenerating guided trajectories...")
+    print(f"[Length={traj_length}] Generating guided trajectories...")
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
@@ -375,13 +346,13 @@ def main():
     guided_states = []
     guided_torques_out = []
 
-    for batch_start in tqdm(range(0, args.num_samples, args.batch_size), desc="Guided"):
+    for batch_start in tqdm(range(0, args.num_samples, args.batch_size), desc=f"Guided L={traj_length}"):
         batch_end = min(batch_start + args.batch_size, args.num_samples)
         batch_torques = traj_torques[batch_start:batch_end]
 
         state, torque_out = model.sample_trajectories(
             num_samples=batch_torques.shape[0],
-            trajectory_length=args.trajectory_length,
+            trajectory_length=traj_length,
             num_diffusion_steps=args.num_diffusion_steps,
             context_fraction=0.2,
             use_ema=False,
@@ -402,11 +373,11 @@ def main():
     guided_torque = torch.cat(guided_torques_out, dim=0)
 
     # Compute MSE and reconstructions for all samples
-    print("\nComputing MSE and reconstructions...")
+    print(f"[Length={traj_length}] Computing MSE and reconstructions...")
     baseline_results = []
     guided_results = []
 
-    for i in tqdm(range(args.num_samples), desc="Computing MSE"):
+    for i in tqdm(range(args.num_samples), desc=f"Computing MSE L={traj_length}"):
         baseline_results.append(
             compute_mse_and_reconstruction(model, baseline_state[i], baseline_torque[i])
         )
@@ -414,14 +385,79 @@ def main():
             compute_mse_and_reconstruction(model, guided_state[i], guided_torque[i])
         )
 
-    # Select best samples
-    selected_indices = select_best_samples(baseline_results, guided_results, n=args.n_display)
+    return baseline_results, guided_results
 
-    # Create comparison figure
-    output_path = os.path.join(args.output_dir, 'trajectory_comparison_guidance.png')
-    create_comparison_figure(baseline_results, guided_results, selected_indices, output_path)
 
-    print("\nDone!")
+def main():
+    parser = argparse.ArgumentParser(description="Trajectory Comparison Visualization")
+    parser.add_argument("--test_torques", type=str, default="data/test_torques_2000.h5",
+                        help="Path to test torques HDF5 file")
+    parser.add_argument("--num_samples", type=int, default=2000,
+                        help="Number of samples to generate")
+    parser.add_argument("--batch_size", type=int, default=200,
+                        help="Batch size for sampling")
+    parser.add_argument("--trajectory_lengths", type=str, default="50,100,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850,900,950,1000",
+                        help="Comma-separated list of trajectory lengths to evaluate")
+    parser.add_argument("--num_diffusion_steps", type=int, default=50,
+                        help="Number of diffusion steps")
+    parser.add_argument("--checkpoint", type=str,
+                        default="/home/gsang/Projects/Perceiver_IO/checkpoints/trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions:epoch=2999_val_loss:val_loss=0.0010.ckpt",
+                        help="Path to model checkpoint")
+    parser.add_argument("--hnn_checkpoint", type=str,
+                        default="/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt",
+                        help="Path to HNN checkpoint")
+    parser.add_argument("--output_dir", type=str, default="plots",
+                        help="Output directory for figures")
+    parser.add_argument("--n_display", type=int, default=3,
+                        help="Number of trajectories to display per length")
+
+    # Guidance config
+    parser.add_argument("--guidance_steps", type=int, default=25)
+    parser.add_argument("--guidance_lr", type=float, default=0.01)
+    parser.add_argument("--guidance_after_steps", type=int, default=45)
+
+    args = parser.parse_args()
+
+    # Parse trajectory lengths
+    trajectory_lengths = [int(x.strip()) for x in args.trajectory_lengths.split(',')]
+    print(f"Will evaluate trajectory lengths: {trajectory_lengths}")
+
+    # Setup
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # Load model and HNN
+    model, hnn = load_model_and_hnn(args.checkpoint, args.hnn_checkpoint, device)
+
+    # Load test torques
+    torque_path = project_root / args.test_torques
+    torques = load_test_torques(str(torque_path), device)
+
+    seed = 228
+
+    # Process each trajectory length
+    for traj_length in trajectory_lengths:
+        print(f"\n{'='*60}")
+        print(f"Processing trajectory length: {traj_length}")
+        print(f"{'='*60}")
+
+        # Generate and evaluate
+        baseline_results, guided_results = generate_and_evaluate_for_length(
+            model, hnn, torques, traj_length, args, device, seed
+        )
+
+        # Select best samples
+        selected_indices = select_best_samples(baseline_results, guided_results, n=args.n_display)
+
+        # Create comparison figure for this length
+        output_path = os.path.join(args.output_dir, f'trajectory_comparison_L{traj_length}.png')
+        create_comparison_figure(baseline_results, guided_results, selected_indices, output_path)
+
+    print(f"\n{'='*60}")
+    print(f"All figures saved to: {args.output_dir}")
+    print(f"{'='*60}")
 
 
 if __name__ == "__main__":
