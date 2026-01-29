@@ -38,7 +38,7 @@ from scripts.dataset import TrajectoryDPFCached
 from src import config
 from src.training.utils import compute_normalization_stats
 
-from src.models.architectures import TrajectoryOutputAdapter, TrajectoryPerceiverIO, ConditionedTrajectoryPerceiverIO
+from src.models.architectures import TrajectoryOutputAdapter, TrajectoryPerceiverIO, ConditionedTrajectoryPerceiverIO, AblationConfig
 import tempfile
 import numpy as np
 
@@ -179,6 +179,8 @@ class TrajectoryDPF(pl.LightningModule):
         p_uncond: float = 0.1,  # Probability of dropping conditioning for CFG
         lambda_cond: float = 0.1,  # Weight for conditioning regularization loss
         encoder_cond_mode: str = "none",  # "mean", "rnn" or "none" for encoder global conditioning
+        # Ablation study configuration
+        ablation_config: Optional[AblationConfig] = None,
         # Simulation metadata (loaded from dataset)
         dt: float = 0.0001,  # Fine simulation timestep
         data_dt: float = 0.00025,  # Data collection timestep
@@ -207,7 +209,8 @@ class TrajectoryDPF(pl.LightningModule):
         self.p_uncond = p_uncond  # CFG dropout probability
         self.lambda_cond = lambda_cond  # Conditioning regularization weight
         self.encoder_cond_mode = encoder_cond_mode
-        
+        self.ablation_config = ablation_config if ablation_config is not None else AblationConfig()
+
         # Simulation metadata for physics-consistent sampling
         self.dt = dt
         self.data_dt = data_dt
@@ -231,8 +234,10 @@ class TrajectoryDPF(pl.LightningModule):
         
         # Total input channels per token: state + diffusion_enc + temporal_enc
         # Token structure: [qpos | mom | diffusion_enc | temporal_enc]
-        # NOTE: Torque is NOT in tokens - it's passed separately for AdaLN conditioning
+        # NOTE: Torque is NOT in tokens unless torque_in_tokens ablation is active
         num_input_channels_raw = self.state_dim + self.diffusion_encoding_channels + self.temporal_encoding_channels
+        if self.ablation_config.torque_in_tokens:
+            num_input_channels_raw += self.torque_dim
         
         # Ensure num_input_channels is divisible by num_heads (8) for attention
         num_heads = 8
@@ -241,6 +246,8 @@ class TrajectoryDPF(pl.LightningModule):
             self.temporal_encoding_channels += padding
             print(f"[Init] Padded temporal_encoding_channels by {padding} to make num_input_channels divisible by {num_heads}")
         num_input_channels = self.state_dim + self.diffusion_encoding_channels + self.temporal_encoding_channels
+        if self.ablation_config.torque_in_tokens:
+            num_input_channels += self.torque_dim
 
         # ------------------------------------------------------------------
         # Token encoding caches (major speed win)
@@ -271,6 +278,7 @@ class TrajectoryDPF(pl.LightningModule):
             cond_dim=cond_dim,
             num_decoder_blocks=num_decoder_blocks,  # Pass it down
             encoder_cond_mode=encoder_cond_mode,
+            ablation_config=self.ablation_config,
         )
         
         # Diffusion schedule (cosine)
@@ -1120,6 +1128,8 @@ def main():
     
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=config.DEFAULT_BATCH_SIZE)
+    parser.add_argument("--devices", type=int, nargs="+", default=[0, 2],
+                        help="GPU device IDs to use for training (e.g., --devices 0 1)")
     parser.add_argument("--num_workers", type=int, default=config.DEFAULT_NUM_WORKERS)
     parser.add_argument("--epochs", type=int, default=config.DEFAULT_EPOCHS)
     parser.add_argument("--lr", type=float, default=config.DEFAULT_LEARNING_RATE)
@@ -1128,6 +1138,9 @@ def main():
     parser.add_argument("--diffusion_steps", type=int, default=config.DEFAULT_DIFFUSION_STEPS)
     parser.add_argument("--num_decoder_blocks", type=int, default=4,
                         help="Number of self-attention blocks in the decoder for trajectory refinement")
+    parser.add_argument("--ablation", type=str, default=None,
+                        choices=["global_cond", "no_shift_right", "no_state_interaction", "torque_concat"],
+                        help="Ablation study mode (default: None = full model)")
     
     # Generation parameters
     parser.add_argument("--num_samples", type=int, default=config.DEFAULT_NUM_SAMPLES, help="Number of trajectories to generate")
@@ -1546,6 +1559,19 @@ def main():
     print(f"[Visualization] Original state range: [{full_state.min():.4f}, {full_state.max():.4f}]")
     print(f"[Visualization] Normalized state range: [{normalized_state.min():.4f}, {normalized_state.max():.4f}]")
 
+    # Build ablation config from CLI argument (None = full model)
+    ablation_config = None
+    if args.ablation is not None:
+        ablation_map = {
+            "global_cond": AblationConfig.global_cond,
+            "no_shift_right": AblationConfig.no_shift_right,
+            "no_state_interaction": AblationConfig.no_state_interaction,
+            "torque_concat": AblationConfig.torque_concat,
+        }
+        ablation_config = ablation_map[args.ablation]()
+        print(f"[Ablation] Running ablation study: {args.ablation}")
+        print(f"[Ablation] Config: {ablation_config}")
+
     # Create model (per-step state-torque interaction conditioning, prefix context)
     model = TrajectoryDPF(
         qpos_dim=qpos_dim,
@@ -1559,6 +1585,7 @@ def main():
         num_decoder_blocks=args.num_decoder_blocks,
         lr=args.lr,
         encoder_cond_mode="none",  # Global encoder conditioning: "mean", "rnn" or "none"
+        ablation_config=ablation_config,
         dt=dt,
         data_dt=data_dt,
         xml_content=xml_content,
@@ -1578,9 +1605,12 @@ def main():
             print("Continuing without W&B logging.")
         else:
             from pytorch_lightning.loggers import WandbLogger
+            wandb_run_name = args.wandb_run_name
+            if args.ablation:
+                wandb_run_name = f"{wandb_run_name}_ablation-{args.ablation}" if wandb_run_name else f"ablation-{args.ablation}"
             logger = WandbLogger(
                 project=args.wandb_project,
-                name=args.wandb_run_name,
+                name=wandb_run_name,
                 entity=args.wandb_entity,
                 save_dir=args.checkpoint_dir,
                 log_model=True,
@@ -1608,9 +1638,10 @@ def main():
     # Setup callbacks
     callbacks = []
     
+    ablation_tag = f"_ablation-{args.ablation}" if args.ablation else ""
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename='trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions:{epoch:03d}_val_loss:{val_loss:.4f}',
+        filename=f'trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions{ablation_tag}:{{epoch:03d}}_val_loss:{{val_loss:.4f}}',
         every_n_epochs=10,  # Save checkpoint every 10 epochs
     )
     callbacks.append(checkpoint_callback)
@@ -1627,7 +1658,7 @@ def main():
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-        devices=[0, 2],
+        devices=args.devices,
         callbacks=callbacks,
         logger=logger,
         # precision="bf16-mixed" if torch.cuda.is_available() else 32,
