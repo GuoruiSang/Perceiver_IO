@@ -41454,4 +41454,1482 @@ HNN Energy: 147.648590 (e1=20.018375, e2=127.630211, e3=0.000019, lambda=0.0)
 [Sampling] Using DDIM sampler with 50 steps
 [Sampling] CFG guidance_scale=1.0
 [Sampling] Context length: 400 (capped at 400 from training length 4000)
-Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  6.06it/s]Sampling:   4%|▍         | 2/50 [00:00<00:07,  6.01it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  6.00it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  6.00it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.99it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.96it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.96it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.96it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.96it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.97it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.97it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.97it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.97it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.97it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.96it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.96it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.97it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.96it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.96it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.96it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.97it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.96it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.97it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.97it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.97it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.97it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.97it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.97it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.96it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.96it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.96it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.97it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.96it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.97it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.97it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.97it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.97it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.97it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.96it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.97it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.97it/s]
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  6.06it/s]Sampling:   4%|▍         | 2/50 [00:00<00:07,  6.01it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  6.00it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  6.00it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.99it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.96it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.96it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.96it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.96it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.97it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.97it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.97it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.97it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.97it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.96it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.96it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.97it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.96it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.96it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.96it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.97it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.96it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.97it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.97it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.97it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.97it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.97it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.97it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.96it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.96it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.96it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.97it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.96it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.97it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.97it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.97it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.97it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.97it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.96it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.97it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.97it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.97it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.97it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.97it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.97it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.75it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.74it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.34it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.14it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.02it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.95it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.87it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.82it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.91it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.09s/it]HNN Energy: 905.128540 (e1=27.146873, e2=877.981689, e3=0.000000, lambda=0.0)
+HNN Energy: 115.460281 (e1=21.093769, e2=94.366508, e3=0.000109, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.82it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.87it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.91it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.48s/it]HNN Energy: 575.060486 (e1=17.182432, e2=557.878052, e3=0.000000, lambda=0.0)
+HNN Energy: 108.299789 (e1=19.265963, e2=89.033829, e3=0.000068, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.83it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.79it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.46s/it]HNN Energy: 309.035736 (e1=9.784691, e2=299.251038, e3=0.000000, lambda=0.0)
+HNN Energy: 102.870819 (e1=17.169462, e2=85.701355, e3=0.000036, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.85it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.79it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.14s/it]HNN Energy: 176.015076 (e1=6.536129, e2=169.478943, e3=0.000000, lambda=0.0)
+HNN Energy: 100.080254 (e1=16.723875, e2=83.356377, e3=0.000020, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.85it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.79it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling: 100%|██████████| 50/50 [00:41<00:00,  5.61s/it]Sampling: 100%|██████████| 50/50 [00:41<00:00,  1.22it/s]
+HNN Energy: 90.715073 (e1=4.525722, e2=86.189354, e3=0.000000, lambda=0.0)
+HNN Energy: 95.760025 (e1=17.345020, e2=78.415001, e3=0.000010, lambda=0.0)
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 400 (capped at 400 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.94it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.97it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.97it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.96it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.96it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.95it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.95it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.96it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.96it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.97it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.96it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.96it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.96it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.96it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.97it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.97it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.96it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.96it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.96it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.97it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.97it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.97it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.96it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.97it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.96it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.96it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.96it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.97it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.97it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.97it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.96it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.96it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.97it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.97it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.98it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.97it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.97it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.97it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.97it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.96it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.97it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.97it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.96it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.96it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.96it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.82it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.08s/it]HNN Energy: 956.229370 (e1=27.518749, e2=928.710632, e3=0.000000, lambda=0.0)
+HNN Energy: 121.850624 (e1=20.698219, e2=101.152405, e3=0.000112, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.79it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.91it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.48s/it]HNN Energy: 631.484009 (e1=18.042126, e2=613.441895, e3=0.000000, lambda=0.0)
+HNN Energy: 116.753067 (e1=19.052536, e2=97.700531, e3=0.000072, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.35it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.14it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.03it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.95it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.87it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.45s/it]HNN Energy: 332.933929 (e1=9.911432, e2=323.022491, e3=0.000000, lambda=0.0)
+HNN Energy: 110.022995 (e1=17.088486, e2=92.934509, e3=0.000038, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.36it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.15it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.03it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.95it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.87it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.91it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.14s/it]HNN Energy: 192.992569 (e1=6.406034, e2=186.586533, e3=0.000000, lambda=0.0)
+HNN Energy: 108.212807 (e1=16.588196, e2=91.624611, e3=0.000021, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.83it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling: 100%|██████████| 50/50 [00:41<00:00,  5.62s/it]Sampling: 100%|██████████| 50/50 [00:41<00:00,  1.22it/s]
+HNN Energy: 107.630272 (e1=4.445245, e2=103.185028, e3=0.000000, lambda=0.0)
+HNN Energy: 103.654213 (e1=16.842093, e2=86.812119, e3=0.000011, lambda=0.0)
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 400 (capped at 400 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.93it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.96it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.96it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.96it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.98it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.96it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.95it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.96it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.97it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.96it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.97it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.95it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.95it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.96it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.96it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.97it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.97it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.97it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.95it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.96it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.97it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.97it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.97it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.96it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.95it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.96it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.96it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.96it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.96it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.96it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.95it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.95it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.96it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.96it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.97it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.96it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.96it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.96it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.96it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.97it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.97it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.96it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.95it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.96it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.95it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.77it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.77it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.36it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.84it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.84it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.83it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.82it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.93it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.08s/it]HNN Energy: 974.651184 (e1=28.309233, e2=946.341980, e3=0.000000, lambda=0.0)
+HNN Energy: 112.744301 (e1=20.604195, e2=92.140106, e3=0.000116, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.89it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.81it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.33it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.14it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.83it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.82it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.82it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.82it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.93it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.47s/it]HNN Energy: 649.683960 (e1=18.323229, e2=631.360718, e3=0.000000, lambda=0.0)
+HNN Energy: 105.945564 (e1=18.869257, e2=87.076309, e3=0.000077, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.80it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.39it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.19it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.06it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.87it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.45s/it]HNN Energy: 317.876831 (e1=9.496864, e2=308.379974, e3=0.000000, lambda=0.0)
+HNN Energy: 98.591667 (e1=16.771482, e2=81.820183, e3=0.000037, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.81it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.77it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.13s/it]HNN Energy: 178.065979 (e1=6.108851, e2=171.957123, e3=0.000000, lambda=0.0)
+HNN Energy: 96.490715 (e1=16.249456, e2=80.241257, e3=0.000021, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.83it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling: 100%|██████████| 50/50 [00:40<00:00,  5.61s/it]Sampling: 100%|██████████| 50/50 [00:40<00:00,  1.22it/s]
+HNN Energy: 89.139580 (e1=3.993229, e2=85.146347, e3=0.000000, lambda=0.0)
+HNN Energy: 91.725800 (e1=16.502563, e2=75.223236, e3=0.000010, lambda=0.0)
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 400 (capped at 400 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.94it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.96it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.97it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.97it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.97it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.95it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.96it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.96it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.97it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.96it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.96it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.96it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.96it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.96it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.97it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.96it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.97it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.97it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.97it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.97it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.97it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.96it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.97it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.97it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.97it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.97it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.97it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.97it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.97it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.97it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.97it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.97it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.96it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.97it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.96it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.97it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.97it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.97it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.96it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.97it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.96it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.97it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.96it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.97it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.96it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:04,  5.75it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.74it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.34it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.15it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.79it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.91it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.08s/it]HNN Energy: 933.170288 (e1=26.917604, e2=906.252686, e3=0.000000, lambda=0.0)
+HNN Energy: 113.592484 (e1=20.326771, e2=93.265709, e3=0.000111, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.91it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.81it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.38it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.93it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.91it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.88it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.85it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.82it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.82it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.82it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.94it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.47s/it]HNN Energy: 591.971313 (e1=16.859119, e2=575.112183, e3=0.000000, lambda=0.0)
+HNN Energy: 105.997391 (e1=18.529739, e2=87.467651, e3=0.000070, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.83it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.79it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.45s/it]HNN Energy: 306.605957 (e1=9.175501, e2=297.430450, e3=0.000000, lambda=0.0)
+HNN Energy: 100.803780 (e1=16.725128, e2=84.078651, e3=0.000036, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.81it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.36it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.82it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.82it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.83it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.83it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.13s/it]HNN Energy: 172.622223 (e1=5.765422, e2=166.856796, e3=0.000000, lambda=0.0)
+HNN Energy: 98.965431 (e1=15.977912, e2=82.987518, e3=0.000020, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.83it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling: 100%|██████████| 50/50 [00:40<00:00,  5.61s/it]Sampling: 100%|██████████| 50/50 [00:40<00:00,  1.22it/s]
+HNN Energy: 91.943062 (e1=3.871710, e2=88.071350, e3=0.000000, lambda=0.0)
+HNN Energy: 94.306351 (e1=16.520029, e2=77.786324, e3=0.000011, lambda=0.0)
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 400 (capped at 400 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.95it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.95it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.96it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.97it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.97it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.96it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.96it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.96it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.97it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.97it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.97it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.97it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.97it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.97it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.97it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.97it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.97it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.97it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.97it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.96it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.97it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.96it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.97it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.96it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.97it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.97it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.97it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.96it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.97it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.96it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.97it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.97it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.97it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.96it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.96it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.96it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.96it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.97it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.96it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.96it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.97it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.96it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.97it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.96it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.97it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.77it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.76it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.84it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.08s/it]HNN Energy: 929.256714 (e1=26.559118, e2=902.697571, e3=0.000000, lambda=0.0)
+HNN Energy: 115.848404 (e1=20.801685, e2=95.046722, e3=0.000111, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.82it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.77it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.47s/it]HNN Energy: 622.050537 (e1=17.693148, e2=604.357361, e3=0.000000, lambda=0.0)
+HNN Energy: 107.581268 (e1=18.977295, e2=88.603973, e3=0.000073, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.38it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.45s/it]HNN Energy: 317.945404 (e1=9.822418, e2=308.122986, e3=0.000000, lambda=0.0)
+HNN Energy: 102.155724 (e1=17.179743, e2=84.975983, e3=0.000037, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.82it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.82it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.79it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.91it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.14s/it]HNN Energy: 181.391663 (e1=6.364347, e2=175.027313, e3=0.000000, lambda=0.0)
+HNN Energy: 100.617546 (e1=16.601534, e2=84.016014, e3=0.000021, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.79it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.76it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.35it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.15it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.02it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.94it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.86it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.82it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.83it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling: 100%|██████████| 50/50 [00:41<00:00,  5.62s/it]Sampling: 100%|██████████| 50/50 [00:41<00:00,  1.22it/s]
+HNN Energy: 101.165955 (e1=4.558378, e2=96.607574, e3=0.000000, lambda=0.0)
+HNN Energy: 96.219086 (e1=17.066797, e2=79.152290, e3=0.000012, lambda=0.0)
+  [6/40] guided/cf_0.10: 206.0s (5 samp/s) [742s elapsed]
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  6.04it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.98it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.96it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.95it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.95it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.91it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.92it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.92it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.92it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.93it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.93it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.93it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.92it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.93it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.93it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.94it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.94it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.93it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.92it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.93it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.93it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.93it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.93it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.92it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.92it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.93it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.93it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.92it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.93it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.92it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.92it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.93it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.92it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.92it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.92it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.93it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.93it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.93it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.93it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.93it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.92it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.92it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.93it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.93it/s]Sampling:  92%|█████████▏| 46/50 [00:07<00:00,  5.92it/s]Sampling:  94%|█████████▍| 47/50 [00:07<00:00,  5.92it/s]Sampling:  96%|█████████▌| 48/50 [00:08<00:00,  5.93it/s]Sampling:  98%|█████████▊| 49/50 [00:08<00:00,  5.92it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.96it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.95it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.93it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.93it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.93it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.93it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.93it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.93it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.92it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.92it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.92it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.92it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.92it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.93it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.93it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.92it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.93it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.92it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.93it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.93it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.92it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.92it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.93it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.93it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.93it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.93it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.92it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.93it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.93it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.93it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.93it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.94it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.93it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.94it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.93it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.93it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.94it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.93it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.93it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.93it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.92it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.92it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.92it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.92it/s]Sampling:  92%|█████████▏| 46/50 [00:07<00:00,  5.93it/s]Sampling:  94%|█████████▍| 47/50 [00:07<00:00,  5.93it/s]Sampling:  96%|█████████▌| 48/50 [00:08<00:00,  5.93it/s]Sampling:  98%|█████████▊| 49/50 [00:08<00:00,  5.93it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.96it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.94it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.93it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.93it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.93it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.93it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.93it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.93it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.93it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.93it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.93it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.93it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.93it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.93it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.93it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.94it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.92it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.92it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.93it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.93it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.92it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.92it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.93it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.92it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.92it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.93it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.93it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.93it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.92it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.92it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.93it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.93it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.93it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.93it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.92it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.93it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.93it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.94it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.93it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.93it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.92it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.93it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.93it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.93it/s]Sampling:  92%|█████████▏| 46/50 [00:07<00:00,  5.93it/s]Sampling:  94%|█████████▍| 47/50 [00:07<00:00,  5.93it/s]Sampling:  96%|█████████▌| 48/50 [00:08<00:00,  5.93it/s]Sampling:  98%|█████████▊| 49/50 [00:08<00:00,  5.93it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.94it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.91it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.92it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.93it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.93it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.93it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.93it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.92it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.92it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.92it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.93it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.93it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.93it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.92it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.92it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.93it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.93it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.93it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.93it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.92it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.92it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.93it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.93it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.93it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.93it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.92it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.93it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.93it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.94it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.93it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.93it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.92it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.93it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.93it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.93it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.93it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.92it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.92it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.92it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.92it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.93it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.93it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.93it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.93it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.93it/s]Sampling:  92%|█████████▏| 46/50 [00:07<00:00,  5.93it/s]Sampling:  94%|█████████▍| 47/50 [00:07<00:00,  5.93it/s]Sampling:  96%|█████████▌| 48/50 [00:08<00:00,  5.93it/s]Sampling:  98%|█████████▊| 49/50 [00:08<00:00,  5.92it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.98it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.95it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.94it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.94it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.93it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.92it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.92it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.92it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.92it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.93it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.93it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.93it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.93it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.93it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.92it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.92it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.93it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.93it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.92it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.92it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.92it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.92it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.93it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.93it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.93it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.92it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.93it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.93it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.92it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.92it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.92it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.92it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.93it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.93it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.93it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.93it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.92it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.92it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.93it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.93it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.93it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.94it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.93it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.92it/s]Sampling:  92%|█████████▏| 46/50 [00:07<00:00,  5.92it/s]Sampling:  94%|█████████▍| 47/50 [00:07<00:00,  5.93it/s]Sampling:  96%|█████████▌| 48/50 [00:08<00:00,  5.93it/s]Sampling:  98%|█████████▊| 49/50 [00:08<00:00,  5.93it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]Sampling: 100%|██████████| 50/50 [00:08<00:00,  5.93it/s]
+  [7/40] unguided/cf_0.15: 42.2s (24 samp/s) [784s elapsed]
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  6.04it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.98it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.96it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.94it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.94it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.93it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.93it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.94it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.93it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.93it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.93it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.93it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.93it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.93it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.93it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.93it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.93it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.92it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.93it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.93it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.93it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.93it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.93it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.92it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.93it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.92it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.92it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.93it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.93it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.92it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.92it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.93it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.93it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.93it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.93it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.92it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.92it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.93it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.93it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.93it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.92it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.92it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.92it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.93it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.77it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.76it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.35it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.14it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.02it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.95it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.87it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.91it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.09s/it]HNN Energy: 844.713440 (e1=24.432619, e2=820.280823, e3=0.000000, lambda=0.0)
+HNN Energy: 99.994278 (e1=19.995968, e2=79.998306, e3=0.000104, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.79it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.03it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.95it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.87it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.82it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.82it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.48s/it]HNN Energy: 537.423035 (e1=15.300638, e2=522.122375, e3=0.000000, lambda=0.0)
+HNN Energy: 95.081261 (e1=18.105453, e2=76.975807, e3=0.000065, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.36it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.15it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.03it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.87it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.79it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.79it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.91it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.46s/it]HNN Energy: 278.150360 (e1=8.376080, e2=269.774292, e3=0.000000, lambda=0.0)
+HNN Energy: 90.412964 (e1=16.144093, e2=74.268875, e3=0.000034, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.81it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.75it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.34it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.14s/it]HNN Energy: 146.962036 (e1=5.113411, e2=141.848633, e3=0.000000, lambda=0.0)
+HNN Energy: 87.545616 (e1=15.579137, e2=71.966476, e3=0.000018, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.82it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.03it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.80it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.91it/s]
+Sampling: 100%|██████████| 50/50 [00:41<00:00,  5.62s/it]Sampling: 100%|██████████| 50/50 [00:41<00:00,  1.22it/s]
+HNN Energy: 65.969437 (e1=3.149358, e2=62.820080, e3=0.000000, lambda=0.0)
+HNN Energy: 82.611801 (e1=16.567289, e2=66.044510, e3=0.000009, lambda=0.0)
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.89it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.92it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.93it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.93it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.94it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.93it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.93it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.93it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.93it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.94it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.93it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.93it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.93it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.93it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.93it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.93it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.93it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.93it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.93it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.93it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.94it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.93it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.93it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.93it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.92it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.92it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.93it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.93it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.93it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.92it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.92it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.92it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.93it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.93it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.93it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.93it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.93it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.92it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.93it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.93it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.93it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.93it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.94it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.92it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.80it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.76it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.36it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.98it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.93it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.90it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.08s/it]HNN Energy: 833.231079 (e1=23.334196, e2=809.896912, e3=0.000000, lambda=0.0)
+HNN Energy: 99.459618 (e1=19.083841, e2=80.375778, e3=0.000101, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.83it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.47s/it]HNN Energy: 563.996460 (e1=15.584570, e2=548.411865, e3=0.000000, lambda=0.0)
+HNN Energy: 95.299515 (e1=17.568827, e2=77.730690, e3=0.000068, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.82it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.45s/it]HNN Energy: 301.677185 (e1=8.495495, e2=293.181702, e3=0.000000, lambda=0.0)
+HNN Energy: 91.769180 (e1=15.868185, e2=75.900993, e3=0.000036, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.83it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.77it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.36it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.06it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.99it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.94it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.90it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.88it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.85it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.84it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.83it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.84it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.84it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.94it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.12s/it]HNN Energy: 163.885483 (e1=5.025884, e2=158.859604, e3=0.000000, lambda=0.0)
+HNN Energy: 89.163940 (e1=15.381639, e2=73.782303, e3=0.000020, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.91it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.83it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.40it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.19it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.06it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.93it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.90it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.89it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.86it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.84it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.84it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.84it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.83it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.83it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.94it/s]
+Sampling: 100%|██████████| 50/50 [00:40<00:00,  5.59s/it]Sampling: 100%|██████████| 50/50 [00:40<00:00,  1.22it/s]
+HNN Energy: 68.756874 (e1=2.719550, e2=66.037323, e3=0.000000, lambda=0.0)
+HNN Energy: 83.314705 (e1=15.947657, e2=67.367050, e3=0.000009, lambda=0.0)
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.88it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.92it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.92it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.91it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.92it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.92it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.92it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.93it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.93it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.92it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.92it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.92it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.92it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.92it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.92it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.93it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.93it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.93it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.92it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.93it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.92it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.93it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.92it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.93it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.93it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.93it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.93it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.93it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.93it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.93it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.93it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.93it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.93it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.93it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.93it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.92it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.93it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.93it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.93it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.93it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.92it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.91it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.92it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.92it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.89it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.81it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.40it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.19it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.06it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.98it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.93it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.93it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.08s/it]HNN Energy: 864.817688 (e1=24.543592, e2=840.274109, e3=0.000000, lambda=0.0)
+HNN Energy: 98.052460 (e1=19.562717, e2=78.489738, e3=0.000106, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.79it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.47s/it]HNN Energy: 582.747070 (e1=16.022106, e2=566.724976, e3=0.000000, lambda=0.0)
+HNN Energy: 93.249374 (e1=17.919767, e2=75.329605, e3=0.000071, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.85it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.80it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.38it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.82it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.83it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.84it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.45s/it]HNN Energy: 289.383423 (e1=8.471235, e2=280.912201, e3=0.000000, lambda=0.0)
+HNN Energy: 87.221176 (e1=15.922397, e2=71.298782, e3=0.000035, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.89it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.82it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.40it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.19it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.07it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.99it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.93it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.85it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.84it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.83it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.84it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.84it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.84it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.94it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.12s/it]HNN Energy: 152.348892 (e1=5.065349, e2=147.283539, e3=0.000000, lambda=0.0)
+HNN Energy: 84.834618 (e1=15.508101, e2=69.326515, e3=0.000019, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.93it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.83it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.39it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.98it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.90it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.88it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.86it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.83it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.84it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.84it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.84it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.94it/s]
+Sampling: 100%|██████████| 50/50 [00:40<00:00,  5.59s/it]Sampling: 100%|██████████| 50/50 [00:40<00:00,  1.22it/s]
+HNN Energy: 63.035980 (e1=2.844154, e2=60.191826, e3=0.000000, lambda=0.0)
+HNN Energy: 79.076225 (e1=16.123484, e2=62.952740, e3=0.000009, lambda=0.0)
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.94it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.93it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.93it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.93it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.93it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.93it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.93it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.93it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.92it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.93it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.92it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.92it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.93it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.93it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.92it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.93it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.92it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.92it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.93it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.93it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.93it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.93it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.92it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.93it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.92it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.93it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.93it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.93it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.92it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.92it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.92it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.93it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.93it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.92it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.92it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.92it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.92it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.92it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.93it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.92it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.92it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.93it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.93it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.93it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.89it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.81it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.38it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.85it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.93it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.08s/it]HNN Energy: 870.972900 (e1=24.592234, e2=846.380676, e3=0.000000, lambda=0.0)
+HNN Energy: 100.381348 (e1=19.208984, e2=81.172363, e3=0.000106, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.83it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.47s/it]HNN Energy: 559.380554 (e1=15.379711, e2=544.000854, e3=0.000000, lambda=0.0)
+HNN Energy: 93.510414 (e1=17.547483, e2=75.962929, e3=0.000068, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.85it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.80it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.19it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.06it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.98it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.93it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.90it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.88it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.86it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.84it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.82it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.82it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.94it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.44s/it]HNN Energy: 277.703735 (e1=7.965197, e2=269.738525, e3=0.000000, lambda=0.0)
+HNN Energy: 87.517166 (e1=15.671650, e2=71.845520, e3=0.000034, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.84it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.79it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.36it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.14it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.03it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.95it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.90it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.87it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.82it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.83it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.83it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.82it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.82it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.83it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.84it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.83it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.83it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.13s/it]HNN Energy: 140.873734 (e1=4.434262, e2=136.439468, e3=0.000000, lambda=0.0)
+HNN Energy: 84.956841 (e1=15.151870, e2=69.804970, e3=0.000018, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.87it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.79it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.39it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.18it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.06it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.99it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.94it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.91it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.88it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.84it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.84it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.85it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.84it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.83it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.83it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.83it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.94it/s]
+Sampling: 100%|██████████| 50/50 [00:40<00:00,  5.60s/it]Sampling: 100%|██████████| 50/50 [00:40<00:00,  1.22it/s]
+HNN Energy: 63.847637 (e1=2.590849, e2=61.256786, e3=0.000000, lambda=0.0)
+HNN Energy: 79.760254 (e1=15.941425, e2=63.818825, e3=0.000009, lambda=0.0)
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 600 (capped at 600 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  5.91it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.94it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.92it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.93it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.93it/s]Sampling:  12%|█▏        | 6/50 [00:01<00:07,  5.92it/s]Sampling:  14%|█▍        | 7/50 [00:01<00:07,  5.92it/s]Sampling:  16%|█▌        | 8/50 [00:01<00:07,  5.92it/s]Sampling:  18%|█▊        | 9/50 [00:01<00:06,  5.92it/s]Sampling:  20%|██        | 10/50 [00:01<00:06,  5.93it/s]Sampling:  22%|██▏       | 11/50 [00:01<00:06,  5.93it/s]Sampling:  24%|██▍       | 12/50 [00:02<00:06,  5.92it/s]Sampling:  26%|██▌       | 13/50 [00:02<00:06,  5.92it/s]Sampling:  28%|██▊       | 14/50 [00:02<00:06,  5.92it/s]Sampling:  30%|███       | 15/50 [00:02<00:05,  5.93it/s]Sampling:  32%|███▏      | 16/50 [00:02<00:05,  5.93it/s]Sampling:  34%|███▍      | 17/50 [00:02<00:05,  5.93it/s]Sampling:  36%|███▌      | 18/50 [00:03<00:05,  5.93it/s]Sampling:  38%|███▊      | 19/50 [00:03<00:05,  5.93it/s]Sampling:  40%|████      | 20/50 [00:03<00:05,  5.92it/s]Sampling:  42%|████▏     | 21/50 [00:03<00:04,  5.93it/s]Sampling:  44%|████▍     | 22/50 [00:03<00:04,  5.93it/s]Sampling:  46%|████▌     | 23/50 [00:03<00:04,  5.93it/s]Sampling:  48%|████▊     | 24/50 [00:04<00:04,  5.92it/s]Sampling:  50%|█████     | 25/50 [00:04<00:04,  5.92it/s]Sampling:  52%|█████▏    | 26/50 [00:04<00:04,  5.93it/s]Sampling:  54%|█████▍    | 27/50 [00:04<00:03,  5.93it/s]Sampling:  56%|█████▌    | 28/50 [00:04<00:03,  5.93it/s]Sampling:  58%|█████▊    | 29/50 [00:04<00:03,  5.93it/s]Sampling:  60%|██████    | 30/50 [00:05<00:03,  5.92it/s]Sampling:  62%|██████▏   | 31/50 [00:05<00:03,  5.93it/s]Sampling:  64%|██████▍   | 32/50 [00:05<00:03,  5.93it/s]Sampling:  66%|██████▌   | 33/50 [00:05<00:02,  5.93it/s]Sampling:  68%|██████▊   | 34/50 [00:05<00:02,  5.92it/s]Sampling:  70%|███████   | 35/50 [00:05<00:02,  5.92it/s]Sampling:  72%|███████▏  | 36/50 [00:06<00:02,  5.92it/s]Sampling:  74%|███████▍  | 37/50 [00:06<00:02,  5.93it/s]Sampling:  76%|███████▌  | 38/50 [00:06<00:02,  5.93it/s]Sampling:  78%|███████▊  | 39/50 [00:06<00:01,  5.92it/s]Sampling:  80%|████████  | 40/50 [00:06<00:01,  5.92it/s]Sampling:  82%|████████▏ | 41/50 [00:06<00:01,  5.92it/s]Sampling:  84%|████████▍ | 42/50 [00:07<00:01,  5.91it/s]Sampling:  86%|████████▌ | 43/50 [00:07<00:01,  5.91it/s]Sampling:  88%|████████▊ | 44/50 [00:07<00:01,  5.92it/s]Sampling:  90%|█████████ | 45/50 [00:07<00:00,  5.92it/s]
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.91it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.82it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.39it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.18it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.05it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.98it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.94it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.91it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.89it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.84it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.83it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.84it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.84it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.84it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.84it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.84it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.83it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.82it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.83it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.83it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.94it/s]
+Sampling:  92%|█████████▏| 46/50 [00:14<00:08,  2.07s/it]HNN Energy: 870.881042 (e1=24.470133, e2=846.410889, e3=0.000000, lambda=0.0)
+HNN Energy: 98.374115 (e1=19.588942, e2=78.785172, e3=0.000106, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.87it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.80it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.39it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.19it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.07it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.99it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.94it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.90it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.87it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.85it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:03<00:02,  3.85it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.84it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.93it/s]
+Sampling:  94%|█████████▍| 47/50 [00:20<00:10,  3.46s/it]HNN Energy: 575.334473 (e1=15.826203, e2=559.508240, e3=0.000000, lambda=0.0)
+HNN Energy: 91.786209 (e1=17.813196, e2=73.973015, e3=0.000070, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.81it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.92it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  96%|█████████▌| 48/50 [00:27<00:08,  4.44s/it]HNN Energy: 283.661987 (e1=8.364754, e2=275.297241, e3=0.000000, lambda=0.0)
+HNN Energy: 87.140709 (e1=15.835156, e2=71.305550, e3=0.000035, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.85it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.80it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.37it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.17it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.97it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.89it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.85it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.83it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.82it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.81it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.81it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.81it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling:  98%|█████████▊| 49/50 [00:34<00:05,  5.13s/it]HNN Energy: 144.652954 (e1=4.788374, e2=139.864578, e3=0.000000, lambda=0.0)
+HNN Energy: 84.618935 (e1=15.291986, e2=69.326950, e3=0.000018, lambda=0.0)
+
+Running Adam Optimization:   0%|          | 0/25 [00:00<?, ?it/s][A
+Running Adam Optimization:   8%|▊         | 2/25 [00:00<00:03,  5.83it/s][A
+Running Adam Optimization:  12%|█▏        | 3/25 [00:00<00:04,  4.78it/s][A
+Running Adam Optimization:  16%|█▌        | 4/25 [00:00<00:04,  4.38it/s][A
+Running Adam Optimization:  20%|██        | 5/25 [00:01<00:04,  4.16it/s][A
+Running Adam Optimization:  24%|██▍       | 6/25 [00:01<00:04,  4.04it/s][A
+Running Adam Optimization:  28%|██▊       | 7/25 [00:01<00:04,  3.96it/s][A
+Running Adam Optimization:  32%|███▏      | 8/25 [00:01<00:04,  3.91it/s][A
+Running Adam Optimization:  36%|███▌      | 9/25 [00:02<00:04,  3.88it/s][A
+Running Adam Optimization:  40%|████      | 10/25 [00:02<00:03,  3.86it/s][A
+Running Adam Optimization:  44%|████▍     | 11/25 [00:02<00:03,  3.84it/s][A
+Running Adam Optimization:  48%|████▊     | 12/25 [00:02<00:03,  3.83it/s][A
+Running Adam Optimization:  52%|█████▏    | 13/25 [00:03<00:03,  3.82it/s][A
+Running Adam Optimization:  56%|█████▌    | 14/25 [00:03<00:02,  3.82it/s][A
+Running Adam Optimization:  60%|██████    | 15/25 [00:03<00:02,  3.81it/s][A
+Running Adam Optimization:  64%|██████▍   | 16/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  68%|██████▊   | 17/25 [00:04<00:02,  3.81it/s][A
+Running Adam Optimization:  72%|███████▏  | 18/25 [00:04<00:01,  3.80it/s][A
+Running Adam Optimization:  76%|███████▌  | 19/25 [00:04<00:01,  3.81it/s][A
+Running Adam Optimization:  80%|████████  | 20/25 [00:05<00:01,  3.80it/s][A
+Running Adam Optimization:  84%|████████▍ | 21/25 [00:05<00:01,  3.81it/s][A
+Running Adam Optimization:  88%|████████▊ | 22/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  92%|█████████▏| 23/25 [00:05<00:00,  3.80it/s][A
+Running Adam Optimization:  96%|█████████▌| 24/25 [00:06<00:00,  3.80it/s][A
+Running Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.80it/s][ARunning Adam Optimization: 100%|██████████| 25/25 [00:06<00:00,  3.92it/s]
+Sampling: 100%|██████████| 50/50 [00:41<00:00,  5.61s/it]Sampling: 100%|██████████| 50/50 [00:41<00:00,  1.22it/s]
+HNN Energy: 66.790184 (e1=2.902601, e2=63.887585, e3=0.000000, lambda=0.0)
+HNN Energy: 79.611946 (e1=16.305819, e2=63.306126, e3=0.000010, lambda=0.0)
+  [8/40] guided/cf_0.15: 206.0s (5 samp/s) [990s elapsed]
+[Sampling] Using regular model weights (use_ema=False)
+[Sampling] Using DDIM sampler with 50 steps
+[Sampling] CFG guidance_scale=1.0
+[Sampling] Context length: 800 (capped at 800 from training length 4000)
+Sampling:   0%|          | 0/50 [00:00<?, ?it/s]Sampling:   2%|▏         | 1/50 [00:00<00:08,  6.01it/s]Sampling:   4%|▍         | 2/50 [00:00<00:08,  5.95it/s]Sampling:   6%|▌         | 3/50 [00:00<00:07,  5.93it/s]Sampling:   8%|▊         | 4/50 [00:00<00:07,  5.92it/s]Sampling:  10%|█         | 5/50 [00:00<00:07,  5.91it/s]
