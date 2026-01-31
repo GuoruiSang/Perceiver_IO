@@ -381,11 +381,15 @@ def main():
                         help="Learning rate for guidance optimization")
     parser.add_argument("--guidance_after_steps", type=int, default=45,
                         help="Start guidance after this many diffusion steps (for 50 total steps)")
-    
+    parser.add_argument("--device", type=str, default="cuda:0",
+                        help="Device to use (e.g. cuda:0, cuda:2)")
+    parser.add_argument("--trajectory_lengths", type=int, nargs="+", default=None,
+                        help="Trajectory lengths to test (e.g. 1050 1100 1150)")
+
     args = parser.parse_args()
-    
+
     # Setup
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
     os.makedirs(args.output_dir, exist_ok=True)
@@ -404,7 +408,7 @@ def main():
     
     # Trajectory lengths to test (can be overridden via CLI)
     # Trained lengths [100, 200, 300, ..., 1000]
-    trajectory_lengths = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    trajectory_lengths = args.trajectory_lengths if args.trajectory_lengths else [1050, 1100, 1150, 1200, 1250, 1300, 1350, 1400, 1450, 1500]
     
     # Run experiment
     results = run_trajectory_length_experiment(
