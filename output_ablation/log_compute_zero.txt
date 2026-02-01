@@ -1,0 +1,94 @@
+Input: /home/gsang/Projects/Perceiver_IO/output_ablation/trajectories
+Output: /home/gsang/Projects/Perceiver_IO/output_ablation/results
+Workers: 32
+Loading HNN from: /home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt
+  HNN loaded on cuda:2
+
+============================================================
+  MODEL: original
+============================================================
+
+  Skipping exp_a_gp (not in filter)
+
+  Skipping exp_a_sinusoidal (not in filter)
+
+  Skipping exp_a_training (not in filter)
+Processing: /home/gsang/Projects/Perceiver_IO/output_ablation/trajectories/original/exp_a_zero.h5
+  L50 unguided: MSE_total=0.006451 MSE_energy=0.151939 (11.8s)
+  L50 guided: MSE_total=0.001230 MSE_energy=0.016467 (12.5s)
+  L100 unguided: MSE_total=0.001731 MSE_energy=0.033656 (7.9s)
+  L100 guided: MSE_total=0.000343 MSE_energy=0.009206 (15.0s)
+  L150 unguided: MSE_total=0.002240 MSE_energy=0.035059 (16.7s)
+  L150 guided: MSE_total=0.000412 MSE_energy=0.007739 (17.6s)
+  L200 unguided: MSE_total=0.004236 MSE_energy=0.066852 (17.6s)
+  L200 guided: MSE_total=0.000812 MSE_energy=0.011218 (21.5s)
+  L250 unguided: MSE_total=0.005146 MSE_energy=0.065131 (16.6s)
+  L250 guided: MSE_total=0.001116 MSE_energy=0.026105 (23.2s)
+  L300 unguided: MSE_total=0.011436 MSE_energy=0.066824 (19.1s)
+  L300 guided: MSE_total=0.002176 MSE_energy=0.055277 (25.7s)
+  L350 unguided: MSE_total=0.018831 MSE_energy=0.080826 (21.9s)
+  L350 guided: MSE_total=0.005157 MSE_energy=0.034419 (23.8s)
+  L400 unguided: MSE_total=0.022240 MSE_energy=0.149951 (31.9s)
+  L400 guided: MSE_total=0.004784 MSE_energy=0.110703 (24.1s)
+  L450 unguided: MSE_total=0.036801 MSE_energy=0.168422 (28.5s)
+  L450 guided: MSE_total=0.006394 MSE_energy=0.124717 (33.6s)
+  L500 unguided: MSE_total=0.027865 MSE_energy=0.161464 (29.4s)
+  L500 guided: MSE_total=0.008256 MSE_energy=0.066013 (28.9s)
+  L550 unguided: MSE_total=0.060170 MSE_energy=0.278516 (39.0s)
+  L550 guided: MSE_total=0.011433 MSE_energy=0.070179 (37.2s)
+  L600 unguided: MSE_total=0.077303 MSE_energy=0.721363 (34.7s)
+  L600 guided: MSE_total=0.016489 MSE_energy=0.107344 (34.3s)
+  L650 unguided: MSE_total=0.093912 MSE_energy=0.256092 (40.6s)
+  L650 guided: MSE_total=0.019597 MSE_energy=0.096693 (44.7s)
+  L700 unguided: MSE_total=0.171656 MSE_energy=0.987476 (40.1s)
+  L700 guided: MSE_total=0.032626 MSE_energy=0.073547 (39.1s)
+  L750 unguided: MSE_total=0.172194 MSE_energy=0.218689 (41.5s)
+  L750 guided: MSE_total=0.046506 MSE_energy=0.066197 (46.9s)
+  L800 unguided: MSE_total=0.215503 MSE_energy=0.484888 (52.8s)
+  L800 guided: MSE_total=0.060912 MSE_energy=0.186451 (45.7s)
+  L850 unguided: MSE_total=0.274312 MSE_energy=0.628341 (47.0s)
+  L850 guided: MSE_total=0.077006 MSE_energy=0.126433 (46.7s)
+  L900 unguided: MSE_total=0.428437 MSE_energy=0.626146 (49.1s)
+  L900 guided: MSE_total=0.150131 MSE_energy=0.197913 (54.0s)
+  L950 unguided: MSE_total=0.434145 MSE_energy=0.702927 (59.4s)
+  L950 guided: MSE_total=0.149983 MSE_energy=0.309008 (56.6s)
+  L1000 unguided: MSE_total=0.653866 MSE_energy=0.531250 (54.4s)
+  L1000 guided: MSE_total=0.191979 MSE_energy=0.249955 (54.8s)
+  L1050 unguided: MSE_total=0.709992 MSE_energy=20.667456 (56.5s)
+  L1050 guided: MSE_total=0.301178 MSE_energy=0.262277 (56.6s)
+  L1100 unguided: MSE_total=0.717066 MSE_energy=1.526410 (58.4s)
+  L1100 guided: MSE_total=0.383245 MSE_energy=0.433683 (67.5s)
+  L1150 unguided: MSE_total=0.944974 MSE_energy=1.121782 (70.7s)
+  L1150 guided: MSE_total=0.622698 MSE_energy=0.471859 (68.3s)
+  L1200 unguided: MSE_total=1.360382 MSE_energy=1.823207 (67.1s)
+  L1200 guided: MSE_total=1.076488 MSE_energy=0.718124 (63.9s)
+  L1250 unguided: MSE_total=1.862175 MSE_energy=8.699538 (66.4s)
+  L1250 guided: MSE_total=1.508514 MSE_energy=1.198899 (67.3s)
+  L1300 unguided: MSE_total=2.586478 MSE_energy=2.394615 (69.5s)
+  L1300 guided: MSE_total=2.173532 MSE_energy=2.026594 (69.3s)
+  L1350 unguided: MSE_total=3.128588 MSE_energy=4.105627 (71.2s)
+  L1350 guided: MSE_total=2.514843 MSE_energy=3.390545 (74.4s)
+  L1400 unguided: MSE_total=3.213291 MSE_energy=8.371593 (82.5s)
+  L1400 guided: MSE_total=2.327019 MSE_energy=6.186237 (84.5s)
+  L1450 unguided: MSE_total=3.520434 MSE_energy=446.453217 (86.0s)
+  L1450 guided: MSE_total=2.812967 MSE_energy=10.661983 (76.6s)
+  L1500 unguided: MSE_total=5.661381 MSE_energy=44.527725 (81.3s)
+  L1500 guided: MSE_total=5.586146 MSE_energy=18.910875 (79.3s)
+  Saved: /home/gsang/Projects/Perceiver_IO/output_ablation/results/original/exp_a_zero.csv
+  Saved: /home/gsang/Projects/Perceiver_IO/output_ablation/results/original/exp_a_zero_energy.h5
+Processing: /home/gsang/Projects/Perceiver_IO/output_ablation/trajectories/original/exp_b_context_fractions.h5
+Traceback (most recent call last):
+  File "/home/gsang/Projects/Perceiver_IO/scripts/compute_ablation_mse.py", line 400, in <module>
+    main()
+  File "/home/gsang/Projects/Perceiver_IO/scripts/compute_ablation_mse.py", line 389, in main
+    process_exp_b_file(
+  File "/home/gsang/Projects/Perceiver_IO/scripts/compute_ablation_mse.py", line 278, in process_exp_b_file
+    with h5py.File(energy_h5_path, 'w') as energy_h5:
+  File "/home/gsang/miniconda3/envs/perceiver/lib/python3.10/site-packages/h5py/_hl/files.py", line 564, in __init__
+    fid = make_fid(name, mode, userblock_size, fapl, fcpl, swmr=swmr)
+  File "/home/gsang/miniconda3/envs/perceiver/lib/python3.10/site-packages/h5py/_hl/files.py", line 244, in make_fid
+    fid = h5f.create(name, h5f.ACC_TRUNC, fapl=fapl, fcpl=fcpl)
+  File "h5py/_objects.pyx", line 56, in h5py._objects.with_phil.wrapper
+  File "h5py/_objects.pyx", line 57, in h5py._objects.with_phil.wrapper
+  File "h5py/h5f.pyx", line 122, in h5py.h5f.create
+BlockingIOError: [Errno 11] Unable to synchronously create file (unable to lock file, errno = 11, error message = 'Resource temporarily unavailable')
