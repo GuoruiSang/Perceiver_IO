@@ -178,7 +178,7 @@ class TrajectoryDPF(pl.LightningModule):
         use_ema: bool = True,
         p_uncond: float = 0.1,  # Probability of dropping conditioning for CFG
         lambda_cond: float = 0.1,  # Weight for conditioning regularization loss
-        encoder_cond_mode: str = "none",  # "mean", "rnn" or "none" for encoder global conditioning
+        encoder_cond_mode: str = "none",  # "per_step", "mean", "rnn" or "none" for encoder conditioning
         # Ablation study configuration
         ablation_config: Optional[AblationConfig] = None,
         # Simulation metadata (loaded from dataset)
@@ -1530,8 +1530,13 @@ def main():
     # Save original trajectory
     os.makedirs('plots', exist_ok=True)
     visualize_trajectory(original_traj_dict, '/home/gsang/Projects/Perceiver_IO/plots')
-    os.rename('/home/gsang/Projects/Perceiver_IO/plots/trajectory.jpg', '/home/gsang/Projects/Perceiver_IO/plots/trajectory_original.jpg')
-    print("[Visualization] Saved /home/gsang/Projects/Perceiver_IO/plots/trajectory_original.jpg")
+    src_path = '/home/gsang/Projects/Perceiver_IO/plots/trajectory.jpg'
+    dst_path = '/home/gsang/Projects/Perceiver_IO/plots/trajectory_original.jpg'
+    if os.path.exists(src_path):
+        os.rename(src_path, dst_path)
+        print(f"[Visualization] Saved {dst_path}")
+    else:
+        print(f"[Visualization] Warning: {src_path} not found, skipping rename")
     
     # Normalize the trajectory
     # State: [qpos | mom]
@@ -1554,8 +1559,13 @@ def main():
     
     # Save normalized trajectory
     visualize_trajectory(normalized_traj_dict, '/home/gsang/Projects/Perceiver_IO/plots')
-    os.rename('/home/gsang/Projects/Perceiver_IO/plots/trajectory.jpg', '/home/gsang/Projects/Perceiver_IO/plots/trajectory_normalized.jpg')
-    print("[Visualization] Saved /home/gsang/Projects/Perceiver_IO/plots/trajectory_normalized.jpg")
+    src_path_norm = '/home/gsang/Projects/Perceiver_IO/plots/trajectory.jpg'
+    dst_path_norm = '/home/gsang/Projects/Perceiver_IO/plots/trajectory_normalized.jpg'
+    if os.path.exists(src_path_norm):
+        os.rename(src_path_norm, dst_path_norm)
+        print(f"[Visualization] Saved {dst_path_norm}")
+    else:
+        print(f"[Visualization] Warning: {src_path_norm} not found, skipping rename")
     print(f"[Visualization] Original state range: [{full_state.min():.4f}, {full_state.max():.4f}]")
     print(f"[Visualization] Normalized state range: [{normalized_state.min():.4f}, {normalized_state.max():.4f}]")
 
@@ -1584,7 +1594,7 @@ def main():
         cond_dim=256,  # AdaLN conditioning embedding dimension
         num_decoder_blocks=args.num_decoder_blocks,
         lr=args.lr,
-        encoder_cond_mode="none",  # Global encoder conditioning: "mean", "rnn" or "none"
+        encoder_cond_mode="per_step",  # Encoder conditioning: "per_step", "mean", "rnn" or "none"
         ablation_config=ablation_config,
         dt=dt,
         data_dt=data_dt,
