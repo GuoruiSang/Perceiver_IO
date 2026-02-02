@@ -183,7 +183,7 @@ class TrajectoryDPF(pl.LightningModule):
         ablation_config: Optional[AblationConfig] = None,
         # Simulation metadata (loaded from dataset)
         dt: float = 0.0001,  # Fine simulation timestep
-        data_dt: float = 0.00025,  # Data collection timestep
+        data_dt: float = 0.0002,  # Data collection timestep (skip_steps * dt = 2 * 0.0001)
         xml_content: Optional[str] = None,  # MuJoCo model XML content
         # Min-max normalization stats (optional, will be computed if not provided)
         qpos_min: Optional[torch.Tensor] = None,

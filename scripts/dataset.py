@@ -144,7 +144,7 @@ class TrajectoryDPFCached(Dataset):
             
             # Load simulation metadata (with defaults for backwards compatibility)
             self.dt = f.attrs.get('dt', 0.0001)
-            self.data_dt = f.attrs.get('data_dt', 0.00025)
+            self.data_dt = f.attrs.get('data_dt', 0.0002)
             self.xml = f.attrs.get('xml', None)
 
             # Pre-allocate and load all data at once

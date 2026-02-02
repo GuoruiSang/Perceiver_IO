@@ -89,8 +89,8 @@ def main():
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--reference_samples", type=int, default=10000,
                         help="Number of sinusoidal samples for computing reference statistics")
-    parser.add_argument("--dt", type=float, default=0.00025,
-                        help="Timestep for sinusoidal reference generation")
+    parser.add_argument("--dt", type=float, default=0.0002,
+                        help="Timestep for sinusoidal reference generation (skip_steps * dt = 2 * 0.0001)")
     args = parser.parse_args()
 
     output_dir = os.path.dirname(args.output)

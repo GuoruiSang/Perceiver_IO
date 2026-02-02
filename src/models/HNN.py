@@ -21,7 +21,7 @@ from scripts.dataset import TrajectoryHNNCached
 # 1. Verification Callback
 # -----------------------------------------------------------------------------
 class PhysicsCheckCallback(pl.Callback):
-    def __init__(self, check_every_n_epochs=5, dt=0.00025):
+    def __init__(self, check_every_n_epochs=5, dt=0.0002):
         self.check_every_n_epochs = check_every_n_epochs
         self.dt = dt  # Must match training data timestep!
 
@@ -526,7 +526,7 @@ class HNNWrapper(pl.LightningModule):
             q0 = qpos[test_indices]
             
             # Integration parameters
-            dt = 0.00025  # Same as data collection timestep
+            dt = 0.0002  # Same as data collection timestep (skip_steps * dt = 2 * 0.0001)
             num_integration_steps = 500
             zero_torque = torch.zeros_like(p0)
             
@@ -648,12 +648,12 @@ if __name__ == "__main__":
     # Optimize matmul performance for NVIDIA A100 GPUs
     torch.set_float32_matmul_precision('high')
     
-    mode = 'test' # 'train' or 'test'
+    mode = 'train' # 'train' or 'test'
     predict_torque = False
     use_torque = True
 
-    train_file = "/home/gsang/Projects/Perceiver_IO/data/traj_40000-steps_4000.h5"
-    test_file = "/home/gsang/Projects/Perceiver_IO/data/traj_4000-steps_4000.h5"
+    train_file = "/home/gsang/Projects/Perceiver_IO/data/traj_80000-steps_4000.h5"
+    test_file = "/home/gsang/Projects/Perceiver_IO/data/traj_2000-steps_4000.h5"
 
     test_checkpoint_file = "/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt"
     if mode == 'train':
@@ -700,7 +700,7 @@ if __name__ == "__main__":
             every_n_epochs=50,  # Save every 50 epochs to reduce I/O
             save_top_k=-1)     # Keep all checkpoints (don't delete old ones)
 
-        verify_callback = PhysicsCheckCallback(check_every_n_epochs=50, dt=0.00025)  # Run less frequently
+        verify_callback = PhysicsCheckCallback(check_every_n_epochs=50, dt=0.0002)  # Run less frequently
         # Only refresh progress bar every 100 batches - prevents SSH lag!
         progress_bar = TQDMProgressBar(refresh_rate=100)
         wandb_logger = WandbLogger(project='HNN_Hinge', name='SeperableHNN(dim1024)-3D-Hinge-CELU', save_dir='/home/gsang/Projects/Perceiver_IO/wandb')
@@ -743,7 +743,7 @@ if __name__ == "__main__":
     trainer = pl.Trainer(
         max_epochs=1000, 
         accelerator='gpu', 
-        devices=[1,2], 
+        devices=[4],
         strategy='ddp_find_unused_parameters_true',
         # Revert to float32 for high-precision gradients required by HNNs
         precision=32,

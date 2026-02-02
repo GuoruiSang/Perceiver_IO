@@ -2,7 +2,7 @@
 Generate sinusoidal torque sequences with the EXACT same parameters as training data.
 
 Training data parameters (from generate_dataset_forward.py → generate() defaults):
-  num_sin=5, lim_amplitude=0.5, lim_frequency=6π, lim_phase=2π, dt=0.00025
+  num_sin=5, lim_amplitude=0.5, lim_frequency=6π, lim_phase=2π, dt=0.0002
 
 Usage:
     python scripts/generate_sinusoidal_torques.py \
@@ -58,8 +58,8 @@ def main():
     parser.add_argument("--num_samples", type=int, default=1000)
     parser.add_argument("--trajectory_length", type=int, default=1500)
     parser.add_argument("--torque_dim", type=int, default=3)
-    parser.add_argument("--dt", type=float, default=0.00025,
-                        help="Timestep (data_dt from training)")
+    parser.add_argument("--dt", type=float, default=0.0002,
+                        help="Timestep (data_dt from training: skip_steps * dt = 2 * 0.0001)")
     parser.add_argument("--seed", type=int, default=99)
     # Exact same parameters as training data generation
     parser.add_argument("--num_sin", type=int, default=5)

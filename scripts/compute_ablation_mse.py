@@ -324,7 +324,7 @@ def main():
                         help="Number of parallel workers for MuJoCo reconstruction")
     parser.add_argument("--qpos_dim", type=int, default=3)
     parser.add_argument("--dt", type=float, default=0.0001)
-    parser.add_argument("--data_dt", type=float, default=0.00025)
+    parser.add_argument("--data_dt", type=float, default=0.0002)
     parser.add_argument("--model_names", type=str, nargs="+",
                         default=["original", "global_cond", "torque_concat"])
     parser.add_argument("--hnn_checkpoint", type=str,

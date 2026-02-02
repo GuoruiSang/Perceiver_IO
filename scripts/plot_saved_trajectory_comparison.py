@@ -65,7 +65,7 @@ EXPERIMENT_DISPLAY = {
 }
 
 
-def reconstruct_single(state_np, torque_np, qpos_dim=3, dt=0.0001, data_dt=0.00025):
+def reconstruct_single(state_np, torque_np, qpos_dim=3, dt=0.0001, data_dt=0.0002):
     """Run MuJoCo reconstruction for a single trajectory.
 
     Returns:
@@ -107,7 +107,7 @@ def reconstruct_single(state_np, torque_np, qpos_dim=3, dt=0.0001, data_dt=0.000
 
 def plot_gen_vs_recon(
     ung_state, ung_torque, guid_state, guid_torque,
-    title, output_path, qpos_dim=3, dt_sim=0.0001, data_dt=0.00025,
+    title, output_path, qpos_dim=3, dt_sim=0.0001, data_dt=0.0002,
 ):
     """Plot generated vs reconstructed for both unguided and guided.
 
@@ -224,8 +224,8 @@ def main():
     parser.add_argument('--qpos_dim', type=int, default=3)
     parser.add_argument('--dt', type=float, default=0.0001,
                         help='MuJoCo simulation timestep')
-    parser.add_argument('--data_dt', type=float, default=0.00025,
-                        help='Data collection timestep')
+    parser.add_argument('--data_dt', type=float, default=0.0002,
+                        help='Data collection timestep (skip_steps * dt = 2 * 0.0001)')
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
