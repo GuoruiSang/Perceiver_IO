@@ -28,7 +28,7 @@ import time
 import torch
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from src.models.utils import reconstruct_traj_with_momentum
+from src.models.utils import reconstruct_traj_with_momentum, central_difference
 from src.models.HNN import HNNWrapper
 
 import mujoco
@@ -112,6 +112,68 @@ def compute_hnn_energy_batch(hnn, qpos, mom, device='cpu', batch_size=10000):
     return H_flat.reshape(N, T)
 
 
+def compute_physics_energy_per_sample(states, torques, qpos_dim, data_dt,
+                                      hnn, device, batch_size=100):
+    """Compute per-sample physics consistency energy (e1 + e2) from generated trajectories.
+
+    Measures how well the generated trajectory satisfies Hamilton's equations:
+        e1 = MSE(dq/dt, dH/dp)
+        e2 = MSE(dp/dt, -dH/dq + torque)
+
+    Args:
+        states: [N, T, state_dim] numpy array (qpos | mom)
+        torques: [N, T, torque_dim] numpy array
+        qpos_dim: int
+        data_dt: float, timestep between data points
+        hnn: HNNWrapper model
+        device: torch device string
+        batch_size: samples per batch (controls GPU memory)
+
+    Returns:
+        energies: [N] numpy array of per-sample physics energy values
+    """
+    N, T, state_dim = states.shape
+    mom_dim = state_dim - qpos_dim
+
+    all_energies = []
+
+    for start in range(0, N, batch_size):
+        end = min(start + batch_size, N)
+
+        seq_qpos = torch.tensor(
+            states[start:end, :, :qpos_dim], dtype=torch.float32, device=device)
+        seq_mom = torch.tensor(
+            states[start:end, :, qpos_dim:], dtype=torch.float32, device=device)
+        seq_torque = torch.tensor(
+            torques[start:end], dtype=torch.float32, device=device)
+
+        # Time derivatives via central difference
+        dot_qpos = central_difference(seq_qpos, data_dt)  # [B, T, qpos_dim]
+        dot_mom = central_difference(seq_mom, data_dt)     # [B, T, mom_dim]
+
+        # HNN predictions with autograd
+        B, T_len, _ = seq_qpos.shape
+        q_flat = seq_qpos.reshape(-1, qpos_dim).detach().requires_grad_(True)
+        p_flat = seq_mom.reshape(-1, mom_dim).detach().requires_grad_(True)
+
+        H = hnn(p_flat, q_flat)  # [B*T, 1]
+        dH_dp, dH_dq = torch.autograd.grad(H.sum(), (p_flat, q_flat))
+
+        dH_dp = dH_dp.reshape(B, T_len, mom_dim)
+        dH_dq = dH_dq.reshape(B, T_len, qpos_dim)
+
+        dot_qpos_pred = dH_dp
+        dot_mom_pred = -dH_dq + seq_torque
+
+        # Per-sample MSE over time and dimensions
+        e1 = torch.mean((dot_qpos - dot_qpos_pred) ** 2, dim=(1, 2))  # [B]
+        e2 = torch.mean((dot_mom - dot_mom_pred) ** 2, dim=(1, 2))    # [B]
+
+        all_energies.append((e1 + e2).detach().cpu().numpy())
+
+    return np.concatenate(all_energies)
+
+
 def compute_metrics_for_group(h5_path, group_name, qpos_dim, dt, data_dt,
                               num_workers, hnn, hnn_device):
     """Compute MSE and energy metrics for all trajectories in an H5 group.
@@ -183,6 +245,10 @@ def compute_metrics_for_group(h5_path, group_name, qpos_dim, dt, data_dt,
     # Energy MSE: per-sample mean over time of (H_gen - H_recon)^2
     mse_energy_per_sample = np.mean((H_gen - H_recon) ** 2, axis=1)  # [N]
 
+    # Physics consistency energy (final energy from sampling)
+    final_energy_per_sample = compute_physics_energy_per_sample(
+        states, torques, qpos_dim, data_dt, hnn, hnn_device)
+
     metrics = {
         'mse_qpos_mean': np.mean(mse_qpos_arr),
         'mse_qpos_std': np.std(mse_qpos_arr),
@@ -192,6 +258,8 @@ def compute_metrics_for_group(h5_path, group_name, qpos_dim, dt, data_dt,
         'mse_total_std': np.std(mse_total_arr),
         'mse_energy_mean': np.mean(mse_energy_per_sample),
         'mse_energy_std': np.std(mse_energy_per_sample),
+        'final_energy_mean': np.mean(final_energy_per_sample),
+        'final_energy_std': np.std(final_energy_per_sample),
     }
 
     return metrics, H_gen, H_recon
@@ -245,6 +313,7 @@ def process_exp_a_file(h5_path, output_csv, energy_h5_path,
                 print(f"  L{traj_length} {mode}: "
                       f"MSE_total={metrics['mse_total_mean']:.6f} "
                       f"MSE_energy={metrics['mse_energy_mean']:.6f} "
+                      f"final_energy={metrics['final_energy_mean']:.6f} "
                       f"({elapsed:.1f}s)")
 
             results.append(row)
@@ -253,6 +322,59 @@ def process_exp_a_file(h5_path, output_csv, energy_h5_path,
     df.to_csv(output_csv, index=False)
     print(f"  Saved: {output_csv}")
     print(f"  Saved: {energy_h5_path}")
+    return df
+
+
+def process_exp_a_final_energy_only(h5_path, existing_csv, qpos_dim, data_dt,
+                                     hnn, hnn_device):
+    """Compute only physics energy and merge into existing CSV (no MuJoCo)."""
+    print(f"Processing (final energy only): {h5_path}")
+
+    with h5py.File(h5_path, 'r') as f:
+        all_groups = []
+        for mode in ['unguided', 'guided']:
+            if mode in f:
+                for length_key in sorted(f[mode].keys(), key=lambda x: int(x[1:])):
+                    all_groups.append(f'{mode}/{length_key}')
+
+    lengths = sorted(set(
+        int(g.split('/')[1][1:]) for g in all_groups
+    ))
+
+    # Load existing CSV to merge into
+    if os.path.exists(existing_csv):
+        df = pd.read_csv(existing_csv)
+    else:
+        df = pd.DataFrame({'trajectory_length': lengths})
+
+    # Compute physics energy for each length/mode
+    for traj_length in lengths:
+        row_mask = df['trajectory_length'] == traj_length
+
+        for mode in ['unguided', 'guided']:
+            group_name = f'{mode}/L{traj_length}'
+            if group_name not in all_groups:
+                continue
+
+            with h5py.File(h5_path, 'r') as f:
+                grp = f[group_name]
+                states = grp['state'][:]    # [N, T, state_dim]
+                torques = grp['torque'][:]  # [N, T, torque_dim]
+
+            start = time.time()
+            fe = compute_physics_energy_per_sample(
+                states, torques, qpos_dim, data_dt, hnn, hnn_device)
+            elapsed = time.time() - start
+
+            prefix = f'{mode}_'
+            df.loc[row_mask, f'{prefix}final_energy_mean'] = np.mean(fe)
+            df.loc[row_mask, f'{prefix}final_energy_std'] = np.std(fe)
+
+            print(f"  L{traj_length} {mode}: "
+                  f"final_energy={np.mean(fe):.6f} ({elapsed:.1f}s)")
+
+    df.to_csv(existing_csv, index=False)
+    print(f"  Saved: {existing_csv}")
     return df
 
 
@@ -336,6 +458,9 @@ def main():
                              "(e.g., 'training,sinusoidal,gp'). Default: all found.")
     parser.add_argument("--skip_exp_b", action="store_true",
                         help="Skip Experiment B processing")
+    parser.add_argument("--final_energy_only", action="store_true",
+                        help="Only compute physics energy (no MuJoCo reconstruction). "
+                             "Merges final_energy columns into existing CSVs.")
     args = parser.parse_args()
 
     input_root = project_root / args.input_dir
@@ -376,12 +501,19 @@ def main():
                 print(f"\n  Skipping exp_a_{torque_label} (not in filter)")
                 continue
             output_csv = output_root / model_name / f'exp_a_{torque_label}.csv'
-            energy_h5 = output_root / model_name / f'exp_a_{torque_label}_energy.h5'
-            process_exp_a_file(
-                str(h5_file), str(output_csv), str(energy_h5),
-                args.qpos_dim, args.dt, args.data_dt, args.num_workers,
-                hnn, args.hnn_device,
-            )
+
+            if args.final_energy_only:
+                process_exp_a_final_energy_only(
+                    str(h5_file), str(output_csv),
+                    args.qpos_dim, args.data_dt, hnn, args.hnn_device,
+                )
+            else:
+                energy_h5 = output_root / model_name / f'exp_a_{torque_label}_energy.h5'
+                process_exp_a_file(
+                    str(h5_file), str(output_csv), str(energy_h5),
+                    args.qpos_dim, args.dt, args.data_dt, args.num_workers,
+                    hnn, args.hnn_device,
+                )
 
         # Process Experiment B file
         exp_b_file = model_dir / 'exp_b_context_fractions.h5'

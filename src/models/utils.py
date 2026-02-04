@@ -590,105 +590,99 @@ def central_difference(seq: torch.Tensor, dt: float) -> torch.Tensor:
     return seq_dot
 
 
+def forward_difference(seq: torch.Tensor, dt: float) -> torch.Tensor:
+    """
+    Compute time derivative using forward difference.
+
+    More aligned with Euler integration: (seq[i+1] - seq[i]) / dt
+    Avoids mixing future/past information that central difference uses.
+
+    Args:
+        seq: [B, T, dim] sequence
+        dt: timestep
+
+    Returns:
+        seq_dot: [B, T, dim] time derivative
+    """
+    seq_dot = torch.zeros_like(seq)
+    # Forward difference for all but last point
+    seq_dot[:, :-1] = (seq[:, 1:] - seq[:, :-1]) / dt
+    # Copy last valid derivative for the final point
+    seq_dot[:, -1] = seq_dot[:, -2]
+    return seq_dot
+
+
 def compute_hnn_physics_energy(
     seq_qpos: torch.Tensor,
     seq_mom: torch.Tensor,
     seq_torque: torch.Tensor,
     hnn: nn.Module,
     dt: float,
-    lambda_init: float = 1.0,
-    seq_qpos_init: torch.Tensor = None,
-    seq_mom_init: torch.Tensor = None,
-    return_components: bool = False,
+    use_forward_diff: bool = False,
 ) -> torch.Tensor:
     """
     Compute HNN-based physics consistency energy for trajectory refinement.
-    
-    Energy = mse(dot_qpos, dot_qpos_pred) + mse(dot_mom, dot_mom_pred) 
-             + lambda_init * mse(current_trajectory, initial_trajectory)
-    
-    Where:
-        - dot_qpos, dot_mom: derivatives computed from trajectory using central difference
-        - dot_qpos_pred = dH/dp (from HNN)
-        - dot_mom_pred = -dH/dq + torque (Hamilton's equation with external torque)
-        - initial_trajectory: the trajectory before optimization started (regularization)
-    
+
+    Energy = MSE(dq/dt, dH/dp) + MSE(dp/dt, -dH/dq + torque)
+
     Args:
-        seq_qpos: [B, T, qpos_dim] position trajectory (current, being optimized)
-        seq_mom: [B, T, mom_dim] momentum trajectory (current, being optimized)
-        seq_torque: [B, T, torque_dim] torque sequence (conditioning)
+        seq_qpos: [B, T, qpos_dim] position trajectory
+        seq_mom: [B, T, mom_dim] momentum trajectory
+        seq_torque: [B, T, torque_dim] torque sequence
         hnn: Trained Hamiltonian Neural Network
         dt: timestep for finite differences
-        lambda_init: weight for regularization term (keeping trajectory close to initial)
-        seq_qpos_init: [B, T, qpos_dim] initial position trajectory (before optimization)
-        seq_mom_init: [B, T, mom_dim] initial momentum trajectory (before optimization)
-    
+        use_forward_diff: if True, use forward difference; else use central difference
+
     Returns:
-        If return_components is False:
-            energy: scalar energy value
-        If return_components is True:
-            (energy, e1, e2, e3): all scalars
+        energy: scalar energy value
     """
-    # Compute derivatives from trajectory using central difference
-    dot_qpos = central_difference(seq_qpos, dt)  # dq/dt from trajectory
-    dot_mom = central_difference(seq_mom, dt)    # dp/dt from trajectory
-    
+    # Compute derivatives from trajectory
+    if use_forward_diff:
+        dot_qpos = forward_difference(seq_qpos, dt)
+        dot_mom = forward_difference(seq_mom, dt)
+    else:
+        dot_qpos = central_difference(seq_qpos, dt)
+        dot_mom = central_difference(seq_mom, dt)
+
     # Compute HNN predictions
-    # HNN takes (p, q) and returns H, then we compute gradients
-    # dq/dt = dH/dp, dp/dt = -dH/dq + torque
     seq_mom_grad = seq_mom.detach().clone().requires_grad_(True)
     seq_qpos_grad = seq_qpos.detach().clone().requires_grad_(True)
-    
-    H = hnn(seq_mom_grad, seq_qpos_grad)  # [B, T, 1]
-    
-    # Compute gradients of H w.r.t. p and q
+
+    H = hnn(seq_mom_grad, seq_qpos_grad)
+
     dH_dp, dH_dq = torch.autograd.grad(
-        H.sum(), 
+        H.sum(),
         (seq_mom_grad, seq_qpos_grad),
         create_graph=True
     )
-    
+
     # HNN predictions for dynamics
     dot_qpos_pred = dH_dp                    # dq/dt = dH/dp
     dot_mom_pred = -dH_dq + seq_torque       # dp/dt = -dH/dq + torque
-    
-    # Energy term 1: position derivative consistency
+
+    # Energy = e1 + e2
     e1 = nn.functional.mse_loss(dot_qpos, dot_qpos_pred)
-    
-    # Energy term 2: momentum derivative consistency
     e2 = nn.functional.mse_loss(dot_mom, dot_mom_pred)
-    
-    # Energy term 3: regularization - keep trajectory close to initial (diffusion prediction)
-    # This prevents the trajectory from drifting too far from the diffusion model's output
-    e3 = torch.tensor(0.0, device=seq_qpos.device)
-    if seq_qpos_init is not None and seq_mom_init is not None:
-        e3_qpos = nn.functional.mse_loss(seq_qpos, seq_qpos_init)
-        e3_mom = nn.functional.mse_loss(seq_mom, seq_mom_init)
-        e3 = e3_qpos + e3_mom
-    
-    energy = e1 + e2 + lambda_init * e3
-    if return_components:
-        return energy, e1.detach(), e2.detach(), e3.detach()
-    return energy
+
+    return e1 + e2
 
 
 from tqdm import trange
 
 def run_langevin_dynamics_hnn(
-    x: torch.Tensor, 
+    x: torch.Tensor,
     seq_torque: torch.Tensor,
     qpos_dim: int,
     mom_dim: int,
-    dt: float, 
-    hnn: nn.Module, 
+    dt: float,
+    hnn: nn.Module,
     num_steps: int,
     step_size: float,
     noise_scale: float,
-    lambda_init: float = 1.0
 ) -> torch.Tensor:
     """
     Refine trajectory using Langevin dynamics with HNN physics energy.
-    
+
     Args:
         x: State tensor [B, T, qpos_dim + mom_dim] with structure [qpos | mom]
         seq_torque: Torque conditioning [B, T, torque_dim] (fixed, not optimized)
@@ -699,27 +693,18 @@ def run_langevin_dynamics_hnn(
         num_steps: Number of Langevin steps
         step_size: Step size for gradient descent
         noise_scale: Scale of injected noise
-        lambda_init: Weight for regularization term (keeping trajectory close to initial)
-    
+
     Returns:
         Refined state tensor [B, T, qpos_dim + mom_dim]
     """
-    # Store initial trajectory for regularization (before optimization)
-    seq_qpos_init = x[:, :, :qpos_dim].detach().clone()
-    seq_mom_init = x[:, :, qpos_dim:qpos_dim + mom_dim].detach().clone()
-    
     seq_qpos = x[:, :, :qpos_dim].clone().requires_grad_(True)
     seq_mom = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().requires_grad_(True)
 
     for i in trange(num_steps, desc='Running Langevin Dynamics'):
-        energy, e1, e2, e3 = compute_hnn_physics_energy(
-            seq_qpos, seq_mom, seq_torque, hnn, dt, lambda_init,
-            seq_qpos_init=seq_qpos_init, seq_mom_init=seq_mom_init,
-            return_components=True,
-        )
-        
+        energy = compute_hnn_physics_energy(seq_qpos, seq_mom, seq_torque, hnn, dt)
+
         if i == 0 or i == num_steps - 1:
-            print(f'HNN Energy: {energy.item():.6f} (e1={e1.item():.6f}, e2={e2.item():.6f}, e3={e3.item():.6f}, lambda={lambda_init})')
+            print(f'HNN Energy: {energy.item():.6f}')
         grad_qpos, grad_mom = torch.autograd.grad(energy, [seq_qpos, seq_mom])
 
         noise_std = (2 * step_size * noise_scale) ** 0.5
@@ -742,13 +727,11 @@ def run_adam_optimization_hnn(
     hnn: nn.Module,
     num_steps: int,
     lr: float = 1e-3,
-    betas: tuple = (0.9, 0.999),
-    eps: float = 1e-8,
-    lambda_init: float = 1.0
+    use_forward_diff: bool = False,
 ) -> torch.Tensor:
     """
     Optimize trajectory using Adam with HNN physics consistency energy.
-    
+
     Args:
         x: State tensor [B, T, qpos_dim + mom_dim] with structure [qpos | mom]
         seq_torque: Torque conditioning [B, T, torque_dim] (fixed, not optimized)
@@ -758,38 +741,27 @@ def run_adam_optimization_hnn(
         hnn: Trained Hamiltonian Neural Network
         num_steps: Number of optimization steps
         lr: Learning rate for Adam optimizer
-        betas: Coefficients for running averages
-        eps: Numerical stability term
-        lambda_init: Weight for regularization term (keeping trajectory close to initial)
-    
+        use_forward_diff: if True, use forward difference; else use central difference
+
     Returns:
         Optimized state tensor [B, T, qpos_dim + mom_dim]
     """
-    # Store initial trajectory for regularization (before optimization)
-    seq_qpos_init = x[:, :, :qpos_dim].detach().clone()
-    seq_mom_init = x[:, :, qpos_dim:qpos_dim + mom_dim].detach().clone()
-    
     seq_qpos = nn.Parameter(x[:, :, :qpos_dim].clone())
     seq_mom = nn.Parameter(x[:, :, qpos_dim:qpos_dim + mom_dim].clone())
 
-    optimizer = torch.optim.Adam(
-        [seq_qpos, seq_mom],
-        lr=lr,
-        betas=betas,
-        eps=eps
-    )
+    optimizer = torch.optim.Adam([seq_qpos, seq_mom], lr=lr)
 
     for i in trange(num_steps, desc='Running Adam Optimization'):
         optimizer.zero_grad()
-        
-        energy, e1, e2, e3 = compute_hnn_physics_energy(
-            seq_qpos, seq_mom, seq_torque, hnn, dt, lambda_init,
-            seq_qpos_init=seq_qpos_init, seq_mom_init=seq_mom_init,
-            return_components=True,
+
+        energy = compute_hnn_physics_energy(
+            seq_qpos, seq_mom, seq_torque, hnn, dt,
+            use_forward_diff=use_forward_diff,
         )
+
         if i == 0 or i == num_steps - 1:
-            print(f'HNN Energy: {energy.item():.6f} (e1={e1.item():.6f}, e2={e2.item():.6f}, e3={e3.item():.6f}, lambda={lambda_init})')
-        
+            print(f'HNN Energy: {energy.item():.6f}')
+
         energy.backward()
         optimizer.step()
 
@@ -1096,18 +1068,15 @@ def run_adam_optimization_hnn_integration(
     hnn: nn.Module,
     num_steps: int,
     lr: float = 1e-3,
-    betas: tuple = (0.9, 0.999),
-    eps: float = 1e-8,
     chunk_length: int = 15,
-    lambda_init: float = 1.0,
 ) -> torch.Tensor:
     """
     Optimize trajectory using Adam with HNN integration-based energy (shooting method).
-    
+
     This uses chunked integration (k-step shooting) instead of derivative matching,
     which enforces causal consistency over short horizons. Each optimization step
     uses randomized chunk positions to avoid boundary artifacts.
-    
+
     Args:
         x: State tensor [B, T, qpos_dim + mom_dim] with structure [qpos | mom]
         seq_torque: Torque conditioning [B, T, torque_dim] (fixed, not optimized)
@@ -1117,58 +1086,33 @@ def run_adam_optimization_hnn_integration(
         hnn: Trained Hamiltonian Neural Network (HNNWrapper)
         num_steps: Number of optimization steps
         lr: Learning rate for Adam optimizer
-        betas: Coefficients for running averages
-        eps: Numerical stability term
         chunk_length: Length of integration chunks (default: 15)
-        lambda_init: Weight for regularization term (keeping trajectory close to initial)
-    
+
     Returns:
         Optimized state tensor [B, T, qpos_dim + mom_dim]
     """
     B, T, _ = x.shape
-    
+
     # Validate chunk length
     if T <= chunk_length:
         print(f"[Warning] Trajectory length {T} <= chunk_length {chunk_length}, falling back to derivative matching")
-        # Fall back to derivative-based method
-        return run_adam_optimization_hnn(
-            x, seq_torque, qpos_dim, mom_dim, dt, hnn, num_steps, lr, betas, eps, lambda_init
-        )
-    
-    # Store initial trajectory for regularization (before optimization)
-    seq_qpos_init = x[:, :, :qpos_dim].detach().clone()
-    seq_mom_init = x[:, :, qpos_dim:qpos_dim + mom_dim].detach().clone()
-    
+        return run_adam_optimization_hnn(x, seq_torque, qpos_dim, mom_dim, dt, hnn, num_steps, lr)
+
     seq_qpos = nn.Parameter(x[:, :, :qpos_dim].clone())
     seq_mom = nn.Parameter(x[:, :, qpos_dim:qpos_dim + mom_dim].clone())
 
-    optimizer = torch.optim.Adam(
-        [seq_qpos, seq_mom],
-        lr=lr,
-        betas=betas,
-        eps=eps
-    )
+    optimizer = torch.optim.Adam([seq_qpos, seq_mom], lr=lr)
 
     for i in trange(num_steps, desc='Running Adam Integration Optimization'):
         optimizer.zero_grad()
-        
-        # Compute integration energy with random chunks
-        # Each step uses different random chunk positions (sliding window effect)
-        integration_energy = compute_chunked_integration_energy(
+
+        energy = compute_chunked_integration_energy(
             seq_qpos, seq_mom, seq_torque, hnn, dt, chunk_length
         )
-        
-        # Regularization: keep trajectory close to initial prediction
-        reg_qpos = nn.functional.mse_loss(seq_qpos, seq_qpos_init)
-        reg_mom = nn.functional.mse_loss(seq_mom, seq_mom_init)
-        reg_energy = reg_qpos + reg_mom
-        
-        # Total energy
-        energy = integration_energy + lambda_init * reg_energy
-        
+
         if i == 0 or i == num_steps - 1:
-            print(f'Integration Energy: {energy.item():.6f} (shooting={integration_energy.item():.6f}, reg={reg_energy.item():.6f}, lambda={lambda_init})')
-        
+            print(f'Integration Energy: {energy.item():.6f}')
+
         energy.backward()
         optimizer.step()
 

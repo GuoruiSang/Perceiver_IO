@@ -21,9 +21,10 @@ from scripts.dataset import TrajectoryHNNCached
 # 1. Verification Callback
 # -----------------------------------------------------------------------------
 class PhysicsCheckCallback(pl.Callback):
-    def __init__(self, check_every_n_epochs=5, dt=0.0002):
+    def __init__(self, check_every_n_epochs=5, dt=0.0002, xml_path='/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml'):
         self.check_every_n_epochs = check_every_n_epochs
         self.dt = dt  # Must match training data timestep!
+        self.xml_path = xml_path
 
     def on_validation_epoch_end(self, trainer, pl_module):
         if trainer.global_rank != 0:
@@ -33,7 +34,7 @@ class PhysicsCheckCallback(pl.Callback):
         
         device = pl_module.device
         
-        model = mujoco.MjModel.from_xml_path('/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml')
+        model = mujoco.MjModel.from_xml_path(self.xml_path)
         model.opt.timestep = self.dt
         data = mujoco.MjData(model)
         
@@ -645,17 +646,30 @@ class HNNWrapper(pl.LightningModule):
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Train or test HNN")
+    parser.add_argument("--mode", type=str, default="train", choices=["train", "test"])
+    parser.add_argument("--train_file", type=str, default="/home/gsang/Projects/Perceiver_IO/data/traj_80000-steps_4000.h5")
+    parser.add_argument("--test_file", type=str, default="/home/gsang/Projects/Perceiver_IO/data/traj_2000-steps_4000.h5")
+    parser.add_argument("--checkpoint_dir", type=str, default="/home/gsang/Projects/Perceiver_IO/checkpoints")
+    parser.add_argument("--checkpoint_prefix", type=str, default="SeperableHNN(dim1024)-CELU")
+    parser.add_argument("--wandb_name", type=str, default="SeperableHNN(dim1024)-3D-Hinge-CELU")
+    parser.add_argument("--test_checkpoint", type=str, default=None)
+    parser.add_argument("--xml_path", type=str, default="/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml",
+                        help="Path to MuJoCo XML file for physics verification callback")
+    args = parser.parse_args()
+
     # Optimize matmul performance for NVIDIA A100 GPUs
     torch.set_float32_matmul_precision('high')
-    
-    mode = 'train' # 'train' or 'test'
+
+    mode = args.mode
     predict_torque = False
     use_torque = True
 
-    train_file = "/home/gsang/Projects/Perceiver_IO/data/traj_80000-steps_4000.h5"
-    test_file = "/home/gsang/Projects/Perceiver_IO/data/traj_2000-steps_4000.h5"
+    train_file = args.train_file
+    test_file = args.test_file
 
-    test_checkpoint_file = "/home/gsang/Projects/Perceiver_IO/checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt"
+    test_checkpoint_file = args.test_checkpoint or f"{args.checkpoint_dir}/{args.checkpoint_prefix}-epoch-epoch=999.ckpt"
     if mode == 'train':
         print("-"*60)
         print(" "*25+"Start Training")
@@ -695,15 +709,15 @@ if __name__ == "__main__":
 
 
         checkpoint_callback = ModelCheckpoint(
-            dirpath='/home/gsang/Projects/Perceiver_IO/checkpoints',
-            filename='SeperableHNN(dim1024)-CELU-epoch-{epoch}',
+            dirpath=args.checkpoint_dir,
+            filename=f'{args.checkpoint_prefix}-epoch-{{epoch}}',
             every_n_epochs=50,  # Save every 50 epochs to reduce I/O
             save_top_k=-1)     # Keep all checkpoints (don't delete old ones)
 
-        verify_callback = PhysicsCheckCallback(check_every_n_epochs=50, dt=0.0002)  # Run less frequently
+        verify_callback = PhysicsCheckCallback(check_every_n_epochs=50, dt=0.0002, xml_path=args.xml_path)
         # Only refresh progress bar every 100 batches - prevents SSH lag!
         progress_bar = TQDMProgressBar(refresh_rate=100)
-        wandb_logger = WandbLogger(project='HNN_Hinge', name='SeperableHNN(dim1024)-3D-Hinge-CELU', save_dir='/home/gsang/Projects/Perceiver_IO/wandb')
+        wandb_logger = WandbLogger(project='HNN_Hinge', name=args.wandb_name, save_dir='/home/gsang/Projects/Perceiver_IO/wandb')
         
     elif mode == 'test':
         print("-"*60)
@@ -743,7 +757,7 @@ if __name__ == "__main__":
     trainer = pl.Trainer(
         max_epochs=1000, 
         accelerator='gpu', 
-        devices=[4],
+        devices=[0],  # When CUDA_VISIBLE_DEVICES=3 is set, device 0 = physical GPU 3
         strategy='ddp_find_unused_parameters_true',
         # Revert to float32 for high-precision gradients required by HNNs
         precision=32,

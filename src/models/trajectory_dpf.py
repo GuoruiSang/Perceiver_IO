@@ -427,14 +427,17 @@ class TrajectoryDPF(pl.LightningModule):
         # Warmup prevents early gradient explosions
         warmup_steps = min(1000, total_steps // 10)  # 10% warmup, max 1000 steps
         
+        min_lr_ratio = 0.1  # Never go below 10% of initial LR
+
         def lr_lambda(step):
             if step < warmup_steps:
                 # Linear warmup
                 return float(step) / float(max(1, warmup_steps))
             else:
-                # Cosine decay after warmup
+                # Cosine decay after warmup (with floor)
                 progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-                return max(0.0, 0.5 * (1.0 + math.cos(math.pi * progress)))
+                cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+                return max(min_lr_ratio, cosine)
         
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
         
@@ -540,10 +543,12 @@ class TrajectoryDPF(pl.LightningModule):
         ]
         T_train = min(T_train, T)  # Clamp to actual batch length
         
-        # Crop to first T_train timesteps
-        state = state[:, :T_train, :]
-        torque = torque[:, :T_train, :]
-        
+        # Random slice of T_train timesteps (data augmentation)
+        max_start = T - T_train
+        start = torch.randint(0, max_start + 1, (1,)).item() if max_start > 0 else 0
+        state = state[:, start:start + T_train, :]
+        torque = torque[:, start:start + T_train, :]
+
         # Random diffusion timestep
         diffusion_t = torch.randint(1, self.diffusion_steps + 1, (1,)).item()
         
@@ -815,12 +820,13 @@ class TrajectoryDPF(pl.LightningModule):
         hnn: nn.Module = None,
         guidance_method: str = "adam",
         guidance_after_steps: int = 0,
+        guidance_before_steps: int = 9999,  # Stop guidance before this step (default: never stop)
         guidance_steps: int = 0,
         guidance_lr: float = 1e-3,
         langevin_step_size: float = 1e-5,
         langevin_noise_scale: float = 1e-6,
-        lambda_init: float = 1.0,  # Weight for initial consistency term
         chunk_length: int = 15,  # Chunk length for integration-based guidance
+        use_forward_diff: bool = False,  # Use forward difference instead of central difference for HamRes
         dt: Optional[float] = None,
         # Torque generation parameters
         torque: torch.Tensor = None,  # Optional: provide torque directly
@@ -983,7 +989,7 @@ class TrajectoryDPF(pl.LightningModule):
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
                 
                 # Apply HNN-based guidance
-                if hnn is not None and guidance_steps > 0 and i >= guidance_after_steps:
+                if hnn is not None and guidance_steps > 0 and guidance_after_steps <= i < guidance_before_steps:
                     # IMPORTANT:
                     # x0 lives in "normalized state space" (intended ~[-1, 1]) but can exceed that range.
                     # If we denormalize an unclamped x0, we can push qpos/mom far outside the training
@@ -993,50 +999,52 @@ class TrajectoryDPF(pl.LightningModule):
                     if guidance_method == "adam":
                         x0_phys = run_adam_optimization_hnn(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
-                            self.data_dt, hnn, guidance_steps, guidance_lr, lambda_init=lambda_init
+                            self.data_dt, hnn, guidance_steps, guidance_lr,
+                            use_forward_diff=use_forward_diff
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
-                            self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale, lambda_init=lambda_init
+                            self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale
                         )
                     elif guidance_method == "adam_integration":
                         x0_phys = run_adam_optimization_hnn_integration(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
-                            chunk_length=chunk_length, lambda_init=lambda_init
+                            chunk_length=chunk_length
                         )
                     x0 = self.normalize_state(x0_phys).detach()
-                
+
                 eps_coef = torch.sqrt(1.0 - a_bar_prev)
                 x = torch.sqrt(a_bar_prev) * x0 + eps_coef * eps
-                
+
             elif sampler == "ddpm_legacy":
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
-                
+
                 # Apply HNN-based guidance
-                if hnn is not None and guidance_steps > 0 and i >= guidance_after_steps:
+                if hnn is not None and guidance_steps > 0 and guidance_after_steps <= i < guidance_before_steps:
                     x0 = torch.clamp(x0, -1.0, 1.0)
                     x0_phys = self.denormalize_state(x0)
-                    
+
                     if guidance_method == "adam":
                         x0_phys = run_adam_optimization_hnn(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
-                            self.data_dt, hnn, guidance_steps, guidance_lr, lambda_init=lambda_init
+                            self.data_dt, hnn, guidance_steps, guidance_lr,
+                            use_forward_diff=use_forward_diff
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
-                            self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale, lambda_init=lambda_init
+                            self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale
                         )
                     elif guidance_method == "adam_integration":
                         x0_phys = run_adam_optimization_hnn_integration(
                             x0_phys, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
-                            chunk_length=chunk_length, lambda_init=lambda_init
+                            chunk_length=chunk_length
                         )
                     x0 = self.normalize_state(x0_phys).detach()
-                
+
                 sigma_t = self._compute_legacy_sigma_t(a_bar_t, a_bar_prev, i == len(ts) - 1)
                 c = torch.sqrt(torch.clamp(1.0 - a_bar_prev - sigma_t * sigma_t, min=0.0))
                 z = torch.randn_like(x_t) if (sigma_t.item() > 0.0) else torch.zeros_like(x_t)
@@ -1138,6 +1146,8 @@ def main():
     parser.add_argument("--diffusion_steps", type=int, default=config.DEFAULT_DIFFUSION_STEPS)
     parser.add_argument("--num_decoder_blocks", type=int, default=4,
                         help="Number of self-attention blocks in the decoder for trajectory refinement")
+    parser.add_argument("--max_trajectories", type=int, default=0,
+                        help="Max trajectories to use from dataset (0 = all)")
     parser.add_argument("--ablation", type=str, default=None,
                         choices=["global_cond", "no_shift_right", "no_state_interaction", "torque_concat"],
                         help="Ablation study mode (default: None = full model)")
@@ -1474,19 +1484,25 @@ def main():
     
     # Training mode - load dataset and setup training
     print(f"Loading dataset from {args.h5_path}...")
-    dataset = TrajectoryDPFCached(args.h5_path, trajectory_length=1000)
-    
+    full_dataset = TrajectoryDPFCached(args.h5_path, trajectory_length=1000)
+
+    if args.max_trajectories > 0 and args.max_trajectories < len(full_dataset):
+        dataset = torch.utils.data.Subset(full_dataset, range(args.max_trajectories))
+        print(f"  Subset to {args.max_trajectories} trajectories")
+    else:
+        dataset = full_dataset
+
     # Get dimensions from first sample
     sample = dataset[0]
     qpos_dim = sample['seq_qpos'].shape[-1]
     mom_dim = sample['seq_mom'].shape[-1]
     torque_dim = sample['seq_torque'].shape[-1]
-    max_timesteps = dataset.num_steps
-    
+    max_timesteps = full_dataset.num_steps
+
     # Get simulation metadata from dataset
-    dt = dataset.dt
-    data_dt = dataset.data_dt
-    xml_content = dataset.xml
+    dt = full_dataset.dt
+    data_dt = full_dataset.data_dt
+    xml_content = full_dataset.xml
     
     print(f"Dataset info:")
     print(f"  Trajectories: {len(dataset)}")
@@ -1594,7 +1610,7 @@ def main():
         cond_dim=256,  # AdaLN conditioning embedding dimension
         num_decoder_blocks=args.num_decoder_blocks,
         lr=args.lr,
-        encoder_cond_mode="per_step",  # Encoder conditioning: "per_step", "mean", "rnn" or "none"
+        encoder_cond_mode="none",  # Encoder conditioning: "per_step", "mean", "rnn" or "none"
         ablation_config=ablation_config,
         dt=dt,
         data_dt=data_dt,
