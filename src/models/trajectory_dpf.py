@@ -834,6 +834,7 @@ class TrajectoryDPF(pl.LightningModule):
         # Temporal smoothing
         smooth_sigma: float = 0.0,  # Gaussian smoothing sigma (0 = disabled, 1-3 recommended)
         smooth_guidance_only: bool = False,  # If True, smooth only for guidance input; output stays unsmoothed
+        smooth_last_step_only: bool = False,  # If True, only smooth at the final diffusion step
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample trajectories using diffusion with classifier-free guidance.
@@ -996,9 +997,12 @@ class TrajectoryDPF(pl.LightningModule):
                 
             elif sampler == "ddim":
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
+                is_last = (i == len(ts) - 1)
+                # Per-step output smoothing (disabled if guidance_only or last_step_only)
+                do_output_smooth = smooth_sigma > 0 and not smooth_guidance_only and not smooth_last_step_only
 
-                # Smooth x0 at every sampling step (skip if smooth_guidance_only)
-                if smooth_sigma > 0 and not smooth_guidance_only:
+                # Smooth x0 at every step
+                if do_output_smooth:
                     from scipy.ndimage import gaussian_filter1d
                     x0_phys = self.denormalize_state(x0)
                     x0_np = x0_phys.cpu().numpy()
@@ -1036,8 +1040,8 @@ class TrajectoryDPF(pl.LightningModule):
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             chunk_length=chunk_length
                         )
-                    # Apply smoothing after guidance (skip if smooth_guidance_only)
-                    if smooth_sigma > 0 and not smooth_guidance_only:
+                    # Smooth after guidance (per-step mode only)
+                    if do_output_smooth:
                         from scipy.ndimage import gaussian_filter1d
                         x0_np = x0_phys.detach().cpu().numpy()
                         x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)
@@ -1049,6 +1053,8 @@ class TrajectoryDPF(pl.LightningModule):
 
             elif sampler == "ddpm_legacy":
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
+                is_last = (i == len(ts) - 1)
+                do_output_smooth = smooth_sigma > 0 and not smooth_guidance_only and not smooth_last_step_only
 
                 # Apply HNN-based guidance
                 if hnn is not None and guidance_steps > 0 and guidance_after_steps <= i < guidance_before_steps:
@@ -1081,8 +1087,8 @@ class TrajectoryDPF(pl.LightningModule):
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             chunk_length=chunk_length
                         )
-                    # Apply smoothing after guidance (skip if smooth_guidance_only)
-                    if smooth_sigma > 0 and not smooth_guidance_only:
+                    # Smooth after guidance (per-step mode only)
+                    if do_output_smooth:
                         from scipy.ndimage import gaussian_filter1d
                         x0_np = x0_phys.detach().cpu().numpy()
                         x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)
@@ -1096,6 +1102,13 @@ class TrajectoryDPF(pl.LightningModule):
         
         # Denormalize state
         state = self.denormalize_state(x)
+
+        # Post-loop smoothing: smooth final output after all sampling is done
+        if smooth_last_step_only and smooth_sigma > 0:
+            from scipy.ndimage import gaussian_filter1d
+            state_np = state.detach().cpu().numpy()
+            state_smoothed = gaussian_filter1d(state_np, sigma=smooth_sigma, axis=1)
+            state = torch.tensor(state_smoothed, dtype=state.dtype, device=state.device)
 
         # Restore original weights if EMA was applied
         if use_ema and self.ema is not None:

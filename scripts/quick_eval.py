@@ -16,10 +16,11 @@ import time
 import numpy as np
 import torch
 import mujoco
+import matplotlib.pyplot as plt
 
 from src.models.trajectory_dpf import TrajectoryDPF
 from src.models.HNN import HNNWrapper
-from src.models.utils import EMA, compare_generated_with_reconstructed
+from src.models.utils import EMA, reconstruct_traj_with_momentum
 
 from compute_ablation_2dof_with_smoothing import (
     SYSTEM_CONFIGS, DT, SIM_DT,
@@ -33,20 +34,21 @@ from compute_ablation_2dof_with_smoothing import (
 SYSTEM          = '3dof'        # '2dof' or '3dof'
 POLICY          = 'sinusoidal'  # 'sinusoidal', 'gp', 'zero', 'spline'
 LENGTH          = 1000           # 轨迹长度
-NUM_SAMPLES     = 100            # 样本数 (小值快速迭代)
+NUM_SAMPLES     = 25            # 样本数 (小值快速迭代)
 SEED            = 3425            # 随机种子
 DEVICE          = 'cuda:4'      # GPU 设备
 
 # 平滑
-SMOOTH_SIGMA         = 0           # 高斯平滑 sigma (0=关闭)
-SMOOTH_GUIDANCE_ONLY = False        # True=只在guidance能量计算时平滑，输出不平滑
+SMOOTH_SIGMA          = 0           # 高斯平滑 sigma (0=关闭)
+SMOOTH_GUIDANCE_ONLY  = False       # True=只在guidance能量计算时平滑，输出不平滑
+SMOOTH_LAST_STEP_ONLY = True       # True=只在最后一步扩散时平滑
 
 # Guidance (None = 用 SYSTEM_CONFIGS 里的系统默认值)
 GUIDANCE_METHOD = 'adam'        # 'adam', 'langevin', 'adam_integration'
-GUIDANCE_STEPS  = 5          # 优化步数/每个 guidance-active 扩散步
-GUIDANCE_LR     = 0.01          # Adam 学习率 (adam/adam_integration 用)
-GUIDANCE_AFTER  = 15          # 第 N 步扩散后开始 guidance
-GUIDANCE_BEFORE = 25          # 第 N 步扩散前停止 guidance
+GUIDANCE_STEPS  = 10          # 优化步数/每个 guidance-active 扩散步
+GUIDANCE_LR     = 0.001          # Adam 学习率 (adam/adam_integration 用)
+GUIDANCE_AFTER  = 10          # 第 N 步扩散后开始 guidance
+GUIDANCE_BEFORE = 20          # 第 N 步扩散前停止 guidance
 # Langevin 专用
 LANGEVIN_STEP_SIZE   = 1e-5    # Langevin 步长
 LANGEVIN_NOISE_SCALE = 1e-6    # Langevin 噪声尺度
@@ -100,35 +102,92 @@ def load_models(cfg, device):
     return dpf, hnn, var_dq, var_dp, mj_model
 
 
+def _reconstruct_gt(qpos, mom, torque, xml_path, qpos_dim):
+    """Run MuJoCo reconstruction for a single sample."""
+    model = mujoco.MjModel.from_xml_path(xml_path)
+    data = mujoco.MjData(model)
+    # Initial velocity from momentum: v = M^{-1} @ p
+    data.qpos[:] = qpos[0]
+    data.qvel[:] = 0
+    mujoco.mj_forward(model, data)
+    M = np.zeros((model.nv, model.nv))
+    mujoco.mj_fullM(model, M, data.qM)
+    initial_qvel = np.linalg.solve(M, mom[0])
+    recon = reconstruct_traj_with_momentum(
+        model, len(qpos), SIM_DT,
+        qpos[0], initial_qvel, torque, data_dt=DT)
+    return recon  # keys: seq_qpos, seq_mom, seq_torque (length T-1)
+
+
 def plot_trajectories(ung_states, ung_torques, gui_states, gui_torques,
                       ung_nq, gui_nq, qpos_dim, xml_path):
-    """Plot median-NMSE_q sample: unguided vs guided, each with MuJoCo GT comparison."""
-    # Pick the sample closest to median NMSE_q
-    ung_idx = int(np.argsort(ung_nq)[len(ung_nq) // 2])
-    gui_idx = int(np.argsort(gui_nq)[len(gui_nq) // 2])
+    """Plot same sample: row1=torque, row2=unguided vs GT, row3=guided vs GT."""
+    # Pick sample closest to guided median NMSE_q (same index for both)
+    idx = int(np.argsort(gui_nq)[len(gui_nq) // 2])
 
     save_dir = str(project_root / 'plots')
     os.makedirs(save_dir, exist_ok=True)
 
-    for label, idx, states, torques, nq in [
-        ('unguided', ung_idx, ung_states, ung_torques, ung_nq),
-        ('guided',   gui_idx, gui_states, gui_torques, gui_nq),
-    ]:
-        s = states[idx]
-        t = torques[idx]
-        traj_dict = {
-            'seq_qpos': s[:, :qpos_dim],
-            'seq_mom':  s[:, qpos_dim:],
-            'seq_torque': t,
-        }
-        name = f'quick_eval_{SYSTEM}_{label}'
-        mse = compare_generated_with_reconstructed(
-            traj_dict, xml_path, save_dir,
-            dt=SIM_DT, data_dt=DT, name=name,
-        )
-        print(f"  {label} (sample {idx}, NMSE_q={nq[idx]:.6f}): "
-              f"MSE_q={mse['mse_qpos']:.6f}, MSE_p={mse['mse_mom']:.6f}")
-        print(f"  -> {save_dir}/{name}.jpg")
+    mom_dim = ung_states.shape[-1] - qpos_dim
+    torque_dim = ung_torques.shape[-1]
+    ncols = qpos_dim + mom_dim  # e.g. 6 for 3DoF
+
+    # Extract sample data (numpy)
+    ung_s = ung_states[idx].detach().cpu().numpy() if torch.is_tensor(ung_states) else ung_states[idx]
+    gui_s = gui_states[idx].detach().cpu().numpy() if torch.is_tensor(gui_states) else gui_states[idx]
+    tau = ung_torques[idx].detach().cpu().numpy() if torch.is_tensor(ung_torques) else ung_torques[idx]
+
+    # MuJoCo GT reconstruction (same initial state & torques → same GT for both)
+    ung_recon = _reconstruct_gt(ung_s[:, :qpos_dim], ung_s[:, qpos_dim:], tau, xml_path, qpos_dim)
+    gui_recon = _reconstruct_gt(gui_s[:, :qpos_dim], gui_s[:, qpos_dim:], tau, xml_path, qpos_dim)
+
+    fig, axes = plt.subplots(3, ncols, figsize=(5 * ncols, 10))
+
+    # Row 0: Torque
+    for d in range(torque_dim):
+        ax = axes[0, d]
+        ax.plot(tau[:, d], linewidth=0.8)
+        ax.set_title(f'torque[{d}]')
+    for d in range(torque_dim, ncols):
+        axes[0, d].set_visible(False)
+
+    # Row 1: Unguided vs GT
+    for d in range(qpos_dim):
+        ax = axes[1, d]
+        ax.scatter(range(len(ung_s[1:])), ung_s[1:, d], s=1, c='blue', alpha=0.7, label='Generated')
+        ax.scatter(range(len(ung_recon['seq_qpos'])), ung_recon['seq_qpos'][:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
+        ax.set_title(f'unguided qpos[{d}]')
+        ax.legend(markerscale=5, fontsize=7)
+    for d in range(mom_dim):
+        ax = axes[1, qpos_dim + d]
+        ax.scatter(range(len(ung_s[1:])), ung_s[1:, qpos_dim + d], s=1, c='blue', alpha=0.7, label='Generated')
+        ax.scatter(range(len(ung_recon['seq_mom'])), ung_recon['seq_mom'][:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
+        ax.set_title(f'unguided mom[{d}]')
+        ax.legend(markerscale=5, fontsize=7)
+
+    # Row 2: Guided vs GT
+    for d in range(qpos_dim):
+        ax = axes[2, d]
+        ax.scatter(range(len(gui_s[1:])), gui_s[1:, d], s=1, c='blue', alpha=0.7, label='Generated')
+        ax.scatter(range(len(gui_recon['seq_qpos'])), gui_recon['seq_qpos'][:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
+        ax.set_title(f'guided qpos[{d}]')
+        ax.legend(markerscale=5, fontsize=7)
+    for d in range(mom_dim):
+        ax = axes[2, qpos_dim + d]
+        ax.scatter(range(len(gui_s[1:])), gui_s[1:, qpos_dim + d], s=1, c='blue', alpha=0.7, label='Generated')
+        ax.scatter(range(len(gui_recon['seq_mom'])), gui_recon['seq_mom'][:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
+        ax.set_title(f'guided mom[{d}]')
+        ax.legend(markerscale=5, fontsize=7)
+
+    fig.suptitle(
+        f'Sample {idx}  |  NMSE_q: ung={ung_nq[idx]:.6f}, gui={gui_nq[idx]:.6f}',
+        fontsize=14, y=1.02)
+    fig.tight_layout()
+    out_path = os.path.join(save_dir, f'quick_eval_{SYSTEM}.jpg')
+    fig.savefig(out_path, bbox_inches='tight', dpi=150)
+    plt.close(fig)
+    print(f"  Plot (sample {idx}): NMSE_q ung={ung_nq[idx]:.6f}, gui={gui_nq[idx]:.6f}")
+    print(f"  -> {out_path}")
 
 
 def run_batch(dpf, torques, noise, L, batch_size, **kwargs):
@@ -171,7 +230,7 @@ def main():
         print(f"  Langevin: step_size={LANGEVIN_STEP_SIZE}  noise_scale={LANGEVIN_NOISE_SCALE}")
     elif GUIDANCE_METHOD == 'adam_integration':
         print(f"  Integration: chunk_length={CHUNK_LENGTH}")
-    print(f"Smoothing: sigma={SMOOTH_SIGMA}  guidance_only={SMOOTH_GUIDANCE_ONLY}  Forward diff: {USE_FORWARD_DIFF}")
+    print(f"Smoothing: sigma={SMOOTH_SIGMA}  guidance_only={SMOOTH_GUIDANCE_ONLY}  last_step_only={SMOOTH_LAST_STEP_ONLY}  Forward diff: {USE_FORWARD_DIFF}")
     if NUM_DIFFUSION_STEPS is not None:
         print(f"Diffusion steps: {NUM_DIFFUSION_STEPS}")
     print(f"{'='*64}")
@@ -198,6 +257,7 @@ def main():
         guidance_steps=guidance_steps, guidance_lr=guidance_lr,
         guidance_after_steps=guidance_after, guidance_before_steps=guidance_before,
         smooth_sigma=SMOOTH_SIGMA, smooth_guidance_only=SMOOTH_GUIDANCE_ONLY,
+        smooth_last_step_only=SMOOTH_LAST_STEP_ONLY,
         use_forward_diff=USE_FORWARD_DIFF,
         langevin_step_size=LANGEVIN_STEP_SIZE,
         langevin_noise_scale=LANGEVIN_NOISE_SCALE,
