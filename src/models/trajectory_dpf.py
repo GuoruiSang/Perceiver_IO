@@ -833,6 +833,7 @@ class TrajectoryDPF(pl.LightningModule):
         initial_noise: torch.Tensor = None,  # Optional: fixed initial noise for reproducible sampling
         # Temporal smoothing
         smooth_sigma: float = 0.0,  # Gaussian smoothing sigma (0 = disabled, 1-3 recommended)
+        smooth_guidance_only: bool = False,  # If True, smooth only for guidance input; output stays unsmoothed
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample trajectories using diffusion with classifier-free guidance.
@@ -996,8 +997,8 @@ class TrajectoryDPF(pl.LightningModule):
             elif sampler == "ddim":
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
 
-                # Smooth x0 at every sampling step
-                if smooth_sigma > 0:
+                # Smooth x0 at every sampling step (skip if smooth_guidance_only)
+                if smooth_sigma > 0 and not smooth_guidance_only:
                     from scipy.ndimage import gaussian_filter1d
                     x0_phys = self.denormalize_state(x0)
                     x0_np = x0_phys.cpu().numpy()
@@ -1007,31 +1008,36 @@ class TrajectoryDPF(pl.LightningModule):
 
                 # Apply HNN-based guidance
                 if hnn is not None and guidance_steps > 0 and guidance_after_steps <= i < guidance_before_steps:
-                    # IMPORTANT:
-                    # x0 lives in "normalized state space" (intended ~[-1, 1]) but can exceed that range.
-                    # If we denormalize an unclamped x0, we can push qpos/mom far outside the training
-                    # distribution, which explodes finite differences and HNN physics energy.
                     x0_phys = self.denormalize_state(x0)
-                    
+
+                    # smooth_guidance_only: smooth a copy for guidance, keep original for output
+                    if smooth_guidance_only and smooth_sigma > 0:
+                        from scipy.ndimage import gaussian_filter1d
+                        x0_gui_np = x0_phys.detach().cpu().numpy()
+                        x0_gui_smooth = gaussian_filter1d(x0_gui_np, sigma=smooth_sigma, axis=1)
+                        x0_gui = torch.tensor(x0_gui_smooth, dtype=x0_phys.dtype, device=x0_phys.device)
+                    else:
+                        x0_gui = x0_phys
+
                     if guidance_method == "adam":
                         x0_phys = run_adam_optimization_hnn(
-                            x0_phys, torque, self.qpos_dim, self.mom_dim,
+                            x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             use_forward_diff=use_forward_diff
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
-                            x0_phys, torque, self.qpos_dim, self.mom_dim,
+                            x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale
                         )
                     elif guidance_method == "adam_integration":
                         x0_phys = run_adam_optimization_hnn_integration(
-                            x0_phys, torque, self.qpos_dim, self.mom_dim,
+                            x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             chunk_length=chunk_length
                         )
-                    # Apply smoothing after guidance to reduce high-frequency noise
-                    if smooth_sigma > 0:
+                    # Apply smoothing after guidance (skip if smooth_guidance_only)
+                    if smooth_sigma > 0 and not smooth_guidance_only:
                         from scipy.ndimage import gaussian_filter1d
                         x0_np = x0_phys.detach().cpu().numpy()
                         x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)
@@ -1049,25 +1055,34 @@ class TrajectoryDPF(pl.LightningModule):
                     x0 = torch.clamp(x0, -1.0, 1.0)
                     x0_phys = self.denormalize_state(x0)
 
+                    # smooth_guidance_only: smooth a copy for guidance, keep original for output
+                    if smooth_guidance_only and smooth_sigma > 0:
+                        from scipy.ndimage import gaussian_filter1d
+                        x0_gui_np = x0_phys.detach().cpu().numpy()
+                        x0_gui_smooth = gaussian_filter1d(x0_gui_np, sigma=smooth_sigma, axis=1)
+                        x0_gui = torch.tensor(x0_gui_smooth, dtype=x0_phys.dtype, device=x0_phys.device)
+                    else:
+                        x0_gui = x0_phys
+
                     if guidance_method == "adam":
                         x0_phys = run_adam_optimization_hnn(
-                            x0_phys, torque, self.qpos_dim, self.mom_dim,
+                            x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             use_forward_diff=use_forward_diff
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
-                            x0_phys, torque, self.qpos_dim, self.mom_dim,
+                            x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale
                         )
                     elif guidance_method == "adam_integration":
                         x0_phys = run_adam_optimization_hnn_integration(
-                            x0_phys, torque, self.qpos_dim, self.mom_dim,
+                            x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             chunk_length=chunk_length
                         )
-                    # Apply smoothing after guidance to reduce high-frequency noise
-                    if smooth_sigma > 0:
+                    # Apply smoothing after guidance (skip if smooth_guidance_only)
+                    if smooth_sigma > 0 and not smooth_guidance_only:
                         from scipy.ndimage import gaussian_filter1d
                         x0_np = x0_phys.detach().cpu().numpy()
                         x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)

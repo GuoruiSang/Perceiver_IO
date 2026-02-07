@@ -30,21 +30,22 @@ from compute_ablation_2dof_with_smoothing import (
 # ============================================================
 # CONFIG — 改这里，然后直接运行脚本
 # ============================================================
-SYSTEM          = '2dof'        # '2dof' or '3dof'
+SYSTEM          = '3dof'        # '2dof' or '3dof'
 POLICY          = 'sinusoidal'  # 'sinusoidal', 'gp', 'zero', 'spline'
 LENGTH          = 1000           # 轨迹长度
 NUM_SAMPLES     = 100            # 样本数 (小值快速迭代)
-SEED            = 42            # 随机种子
+SEED            = 3425            # 随机种子
 DEVICE          = 'cuda:4'      # GPU 设备
 
 # 平滑
-SMOOTH_SIGMA    = 0           # 高斯平滑 sigma (0=关闭)
+SMOOTH_SIGMA         = 0           # 高斯平滑 sigma (0=关闭)
+SMOOTH_GUIDANCE_ONLY = False        # True=只在guidance能量计算时平滑，输出不平滑
 
 # Guidance (None = 用 SYSTEM_CONFIGS 里的系统默认值)
 GUIDANCE_METHOD = 'adam'        # 'adam', 'langevin', 'adam_integration'
-GUIDANCE_STEPS  = 1          # 优化步数/每个 guidance-active 扩散步
-GUIDANCE_LR     = 0.0001          # Adam 学习率 (adam/adam_integration 用)
-GUIDANCE_AFTER  = 0          # 第 N 步扩散后开始 guidance
+GUIDANCE_STEPS  = 5          # 优化步数/每个 guidance-active 扩散步
+GUIDANCE_LR     = 0.01          # Adam 学习率 (adam/adam_integration 用)
+GUIDANCE_AFTER  = 15          # 第 N 步扩散后开始 guidance
 GUIDANCE_BEFORE = 25          # 第 N 步扩散前停止 guidance
 # Langevin 专用
 LANGEVIN_STEP_SIZE   = 1e-5    # Langevin 步长
@@ -170,7 +171,7 @@ def main():
         print(f"  Langevin: step_size={LANGEVIN_STEP_SIZE}  noise_scale={LANGEVIN_NOISE_SCALE}")
     elif GUIDANCE_METHOD == 'adam_integration':
         print(f"  Integration: chunk_length={CHUNK_LENGTH}")
-    print(f"Smoothing: sigma={SMOOTH_SIGMA}  Forward diff: {USE_FORWARD_DIFF}")
+    print(f"Smoothing: sigma={SMOOTH_SIGMA}  guidance_only={SMOOTH_GUIDANCE_ONLY}  Forward diff: {USE_FORWARD_DIFF}")
     if NUM_DIFFUSION_STEPS is not None:
         print(f"Diffusion steps: {NUM_DIFFUSION_STEPS}")
     print(f"{'='*64}")
@@ -196,7 +197,8 @@ def main():
         hnn=hnn, guidance_method=GUIDANCE_METHOD,
         guidance_steps=guidance_steps, guidance_lr=guidance_lr,
         guidance_after_steps=guidance_after, guidance_before_steps=guidance_before,
-        smooth_sigma=SMOOTH_SIGMA, use_forward_diff=USE_FORWARD_DIFF,
+        smooth_sigma=SMOOTH_SIGMA, smooth_guidance_only=SMOOTH_GUIDANCE_ONLY,
+        use_forward_diff=USE_FORWARD_DIFF,
         langevin_step_size=LANGEVIN_STEP_SIZE,
         langevin_noise_scale=LANGEVIN_NOISE_SCALE,
         chunk_length=CHUNK_LENGTH,
