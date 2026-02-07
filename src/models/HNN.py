@@ -142,7 +142,7 @@ class SeperableHNN(nn.Module):
             nn.CELU(),
             nn.Linear(1024, 1),
         )
-        
+
         # Potential Energy V(q)
         self.potential = nn.Sequential(
             nn.Linear(coordinate_dim, 1024),
@@ -159,6 +159,82 @@ class SeperableHNN(nn.Module):
     def forward(self, p, q):
         T = self.kinetic(torch.cat([p, q], dim=-1))
         V = self.potential(q)
+        return T + V
+
+
+class StructuredHNN(nn.Module):
+    """Physics-structured HNN: enforces T(q,p) = 0.5 * p^T M^{-1}(q) p.
+
+    For mechanical systems, kinetic energy is ALWAYS quadratic in momentum.
+    Instead of learning an arbitrary T(p,q), we learn the inverse mass matrix
+    M^{-1}(q) via its Cholesky decomposition (guaranteed SPD).
+
+    V(q) uses [q, sin(q), cos(q)] features since gravity potential depends
+    on trigonometric functions of joint angles.
+    """
+    def __init__(self, coordinate_dim, momenta_dim, hidden_dim=256, num_layers=4):
+        super().__init__()
+        self.dim = coordinate_dim
+        # Number of free parameters in lower-triangular L: dim*(dim+1)/2
+        self.num_chol_params = coordinate_dim * (coordinate_dim + 1) // 2
+
+        # Input features: [q, sin(q), cos(q)]
+        trig_input_dim = 3 * coordinate_dim
+
+        # Network to predict Cholesky factor L(q) of M^{-1}(q)
+        chol_layers = []
+        chol_layers.append(nn.Linear(trig_input_dim, hidden_dim))
+        chol_layers.append(nn.SiLU())
+        for _ in range(num_layers - 2):
+            chol_layers.append(nn.Linear(hidden_dim, hidden_dim))
+            chol_layers.append(nn.SiLU())
+        chol_layers.append(nn.Linear(hidden_dim, self.num_chol_params))
+        self.cholesky_net = nn.Sequential(*chol_layers)
+
+        # Network to predict V(q) with trig features
+        v_layers = []
+        v_layers.append(nn.Linear(trig_input_dim, hidden_dim))
+        v_layers.append(nn.SiLU())
+        for _ in range(num_layers - 2):
+            v_layers.append(nn.Linear(hidden_dim, hidden_dim))
+            v_layers.append(nn.SiLU())
+        v_layers.append(nn.Linear(hidden_dim, 1))
+        self.potential_net = nn.Sequential(*v_layers)
+
+        # Indices for filling lower triangular matrix
+        self.register_buffer('tril_rows', torch.tril_indices(coordinate_dim, coordinate_dim)[0])
+        self.register_buffer('tril_cols', torch.tril_indices(coordinate_dim, coordinate_dim)[1])
+        self.register_buffer('diag_idx', torch.arange(coordinate_dim))
+
+    def _trig_features(self, q):
+        return torch.cat([q, torch.sin(q), torch.cos(q)], dim=-1)
+
+    def _get_cholesky(self, q):
+        """Predict Cholesky factor L(q) such that M^{-1}(q) = L @ L^T (SPD)."""
+        features = self._trig_features(q)
+        raw = self.cholesky_net(features)  # [B, num_chol_params]
+
+        B = q.shape[0]
+        L = torch.zeros(B, self.dim, self.dim, device=q.device, dtype=q.dtype)
+        L[:, self.tril_rows, self.tril_cols] = raw
+
+        # Softplus on diagonal ensures positive definiteness
+        L[:, self.diag_idx, self.diag_idx] = nn.functional.softplus(
+            L[:, self.diag_idx, self.diag_idx]
+        ) + 1e-4
+
+        return L
+
+    def forward(self, p, q):
+        # Kinetic energy: T = 0.5 * p^T M^{-1}(q) p = 0.5 * ||L(q)^T p||^2
+        L = self._get_cholesky(q)                                    # [B, dim, dim]
+        Ltp = torch.bmm(L.transpose(1, 2), p.unsqueeze(-1))         # [B, dim, 1]
+        T = 0.5 * (Ltp.squeeze(-1) ** 2).sum(dim=-1, keepdim=True)  # [B, 1]
+
+        # Potential energy: V(q)
+        features = self._trig_features(q)
+        V = self.potential_net(features)  # [B, 1]
+
         return T + V
 
 class TorquePredictor(nn.Module):
@@ -182,11 +258,18 @@ class TorquePredictor(nn.Module):
 # 3. HNN Wrapper
 # -----------------------------------------------------------------------------
 class HNNWrapper(pl.LightningModule):
-    def __init__(self, coordinate_dim, momenta_dim, use_torque=True, predict_torque=True, 
-                 qvel_var=1.0, mom_dot_var=1.0, q_std=1.0, p_std=1.0, eps: float = 1e-8):
+    def __init__(self, coordinate_dim, momenta_dim, use_torque=True, predict_torque=True,
+                 qvel_var=1.0, mom_dot_var=1.0, q_std=1.0, p_std=1.0, eps: float = 1e-8,
+                 model_type='structured', hidden_dim=256, num_layers=4, lr=3e-4):
         super().__init__()
         self.save_hyperparameters()  # Save hyperparameters for checkpoint loading
-        self.model = SeperableHNN(coordinate_dim, momenta_dim)
+        if model_type == 'structured':
+            self.model = StructuredHNN(coordinate_dim, momenta_dim,
+                                       hidden_dim=hidden_dim, num_layers=num_layers)
+        elif model_type == 'separable':
+            self.model = SeperableHNN(coordinate_dim, momenta_dim)
+        else:
+            self.model = HNN(coordinate_dim, momenta_dim)
         self.use_torque = use_torque
         self.predict_torque = predict_torque
         if self.use_torque and self.predict_torque:
@@ -290,7 +373,8 @@ class HNNWrapper(pl.LightningModule):
 
     def configure_optimizers(self):
         # HNN-friendly optimizer: NO weight decay (hurts gradient fidelity)
-        optimizer = torch.optim.AdamW(self.parameters(), lr=3e-4, weight_decay=0.0, fused=True)
+        lr = self.hparams.get('lr', 3e-4)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, weight_decay=0.0, fused=True)
         
         # CosineAnnealingLR: smooth decay from start, NO warm-up spike
         # This avoids the "loss down then up" pattern caused by OneCycleLR's LR ramp.
@@ -657,6 +741,13 @@ if __name__ == "__main__":
     parser.add_argument("--test_checkpoint", type=str, default=None)
     parser.add_argument("--xml_path", type=str, default="/home/gsang/Projects/Perceiver_IO/configs/rigid_arm_hinge.xml",
                         help="Path to MuJoCo XML file for physics verification callback")
+    parser.add_argument("--model_type", type=str, default="structured",
+                        choices=["structured", "separable", "hnn"],
+                        help="Model architecture: structured (quadratic T), separable (MLP T+V), hnn (single MLP)")
+    parser.add_argument("--hidden_dim", type=int, default=256,
+                        help="Hidden dimension for structured model (default: 256)")
+    parser.add_argument("--num_layers", type=int, default=4,
+                        help="Number of layers for structured model (default: 4)")
     args = parser.parse_args()
 
     # Optimize matmul performance for NVIDIA A100 GPUs
@@ -687,8 +778,8 @@ if __name__ == "__main__":
         train_data = full_dataset
         val_data = TrajectoryHNNCached(test_file)
         
-        # Balanced batch size for both throughput and convergence
-        batch_size_per_gpu = 8192 # Increased batch size
+        # Smaller batch = more gradient updates per epoch = faster convergence
+        batch_size_per_gpu = 2048 if args.model_type == 'structured' else 8192
         
         train_loader = DataLoader(
             train_data, 
@@ -750,9 +841,15 @@ if __name__ == "__main__":
         print(f"  - qvel_var (mean): {qvel_var.mean().item():.4f}, mom_dot_var (mean): {mom_dot_var.mean().item():.4f}")
         print(f"  - q_std (mean): {q_std.mean().item():.4f}, p_std (mean): {p_std.mean().item():.4f}")
 
+    # LR sqrt scaling: lr = 3e-4 * sqrt(batch_size / 8192)
+    lr = 3e-4 * (batch_size_per_gpu / 8192) ** 0.5
+    print(f"Learning rate: {lr:.2e} (sqrt-scaled from 3e-4 at bs=8192 to bs={batch_size_per_gpu})")
+
     pl_model = HNNWrapper(dim, dim, use_torque=use_torque, predict_torque=predict_torque,
                           qvel_var=qvel_var, mom_dot_var=mom_dot_var,
-                          q_std=q_std, p_std=p_std)
+                          q_std=q_std, p_std=p_std,
+                          model_type=args.model_type, hidden_dim=args.hidden_dim,
+                          num_layers=args.num_layers, lr=lr)
     
     trainer = pl.Trainer(
         max_epochs=1000, 
@@ -769,7 +866,7 @@ if __name__ == "__main__":
         gradient_clip_val=1.0,
         gradient_clip_algorithm='norm',
         # Speed optimizations for huge datasets:
-        limit_train_batches=2000,   # Increased for larger model capacity
+        limit_train_batches=2000,
         limit_val_batches=0.05,      # Validate only on 5% of the val set
         val_check_interval=1.0,      # Check val at the end of every "virtual" epoch
         )

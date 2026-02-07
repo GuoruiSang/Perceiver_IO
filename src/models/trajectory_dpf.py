@@ -830,6 +830,9 @@ class TrajectoryDPF(pl.LightningModule):
         dt: Optional[float] = None,
         # Torque generation parameters
         torque: torch.Tensor = None,  # Optional: provide torque directly
+        initial_noise: torch.Tensor = None,  # Optional: fixed initial noise for reproducible sampling
+        # Temporal smoothing
+        smooth_sigma: float = 0.0,  # Gaussian smoothing sigma (0 = disabled, 1-3 recommended)
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample trajectories using diffusion with classifier-free guidance.
@@ -858,7 +861,9 @@ class TrajectoryDPF(pl.LightningModule):
             dt: timestep used to parameterize random torque generation (seconds between torque samples).
                 If None, defaults to self.data_dt (dataset control timestep).
             torque: optional pre-generated torque [num_samples, trajectory_length, torque_dim]
-        
+            initial_noise: optional fixed initial noise [num_samples, trajectory_length, state_dim]
+                for reproducible sampling with different parameters (e.g., context_fraction)
+
         Returns:
             Tuple of:
                 - state: [num_samples, trajectory_length, state_dim] (qpos, mom)
@@ -899,7 +904,10 @@ class TrajectoryDPF(pl.LightningModule):
             torque = torque.to(device)
         
         # Start with pure noise for state (qpos, mom)
-        x = torch.randn(num_samples, trajectory_length, self.state_dim, device=device)
+        if initial_noise is not None:
+            x = initial_noise.to(device)
+        else:
+            x = torch.randn(num_samples, trajectory_length, self.state_dim, device=device)
         
         # Normalized conditioning (torque passed separately for AdaLN)
         cond = self.normalize_cond(torque)
@@ -987,7 +995,16 @@ class TrajectoryDPF(pl.LightningModule):
                 
             elif sampler == "ddim":
                 x0 = self._predict_x0(x_t, eps, a_bar_t)
-                
+
+                # Smooth x0 at every sampling step
+                if smooth_sigma > 0:
+                    from scipy.ndimage import gaussian_filter1d
+                    x0_phys = self.denormalize_state(x0)
+                    x0_np = x0_phys.cpu().numpy()
+                    x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)
+                    x0_phys = torch.tensor(x0_smoothed, dtype=x0_phys.dtype, device=x0_phys.device)
+                    x0 = self.normalize_state(x0_phys)
+
                 # Apply HNN-based guidance
                 if hnn is not None and guidance_steps > 0 and guidance_after_steps <= i < guidance_before_steps:
                     # IMPORTANT:
@@ -1013,6 +1030,12 @@ class TrajectoryDPF(pl.LightningModule):
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             chunk_length=chunk_length
                         )
+                    # Apply smoothing after guidance to reduce high-frequency noise
+                    if smooth_sigma > 0:
+                        from scipy.ndimage import gaussian_filter1d
+                        x0_np = x0_phys.detach().cpu().numpy()
+                        x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)
+                        x0_phys = torch.tensor(x0_smoothed, dtype=x0_phys.dtype, device=x0_phys.device)
                     x0 = self.normalize_state(x0_phys).detach()
 
                 eps_coef = torch.sqrt(1.0 - a_bar_prev)
@@ -1043,6 +1066,12 @@ class TrajectoryDPF(pl.LightningModule):
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             chunk_length=chunk_length
                         )
+                    # Apply smoothing after guidance to reduce high-frequency noise
+                    if smooth_sigma > 0:
+                        from scipy.ndimage import gaussian_filter1d
+                        x0_np = x0_phys.detach().cpu().numpy()
+                        x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)
+                        x0_phys = torch.tensor(x0_smoothed, dtype=x0_phys.dtype, device=x0_phys.device)
                     x0 = self.normalize_state(x0_phys).detach()
 
                 sigma_t = self._compute_legacy_sigma_t(a_bar_t, a_bar_prev, i == len(ts) - 1)
@@ -1052,11 +1081,11 @@ class TrajectoryDPF(pl.LightningModule):
         
         # Denormalize state
         state = self.denormalize_state(x)
-        
+
         # Restore original weights if EMA was applied
         if use_ema and self.ema is not None:
             self.ema.restore(self.model)
-        
+
         self.model.train()
         return state, torque
     
@@ -1151,6 +1180,9 @@ def main():
     parser.add_argument("--ablation", type=str, default=None,
                         choices=["global_cond", "no_shift_right", "no_state_interaction", "torque_concat"],
                         help="Ablation study mode (default: None = full model)")
+    parser.add_argument("--fixed_trajectory_length", type=int, default=None,
+                        help="Fixed trajectory length for non-DPF training (disables variable-length). "
+                             "When set, all training samples use this exact length instead of random lengths from 100-1000.")
     
     # Generation parameters
     parser.add_argument("--num_samples", type=int, default=config.DEFAULT_NUM_SAMPLES, help="Number of trajectories to generate")
@@ -1483,8 +1515,9 @@ def main():
         return
     
     # Training mode - load dataset and setup training
+    dataset_traj_length = args.fixed_trajectory_length if args.fixed_trajectory_length else 1000
     print(f"Loading dataset from {args.h5_path}...")
-    full_dataset = TrajectoryDPFCached(args.h5_path, trajectory_length=1000)
+    full_dataset = TrajectoryDPFCached(args.h5_path, trajectory_length=dataset_traj_length)
 
     if args.max_trajectories > 0 and args.max_trajectories < len(full_dataset):
         dataset = torch.utils.data.Subset(full_dataset, range(args.max_trajectories))
@@ -1598,6 +1631,13 @@ def main():
         print(f"[Ablation] Running ablation study: {args.ablation}")
         print(f"[Ablation] Config: {ablation_config}")
 
+    # Determine trajectory length training options
+    if args.fixed_trajectory_length:
+        traj_length_options = (args.fixed_trajectory_length,)
+        print(f"[Fixed-Length] Training with fixed trajectory length: {args.fixed_trajectory_length}")
+    else:
+        traj_length_options = (100, 200, 300, 400, 500, 600, 700, 800, 900, 1000)
+
     # Create model (per-step state-torque interaction conditioning, prefix context)
     model = TrajectoryDPF(
         qpos_dim=qpos_dim,
@@ -1609,6 +1649,7 @@ def main():
         num_latent_channels=args.num_latent_channels,
         cond_dim=256,  # AdaLN conditioning embedding dimension
         num_decoder_blocks=args.num_decoder_blocks,
+        trajectory_length_training_options=traj_length_options,
         lr=args.lr,
         encoder_cond_mode="none",  # Encoder conditioning: "per_step", "mean", "rnn" or "none"
         ablation_config=ablation_config,
@@ -1632,6 +1673,12 @@ def main():
         else:
             from pytorch_lightning.loggers import WandbLogger
             wandb_run_name = args.wandb_run_name
+            if args.fixed_trajectory_length:
+                # Replace VariableTrajLength with FixedTrajLength in the run name
+                if wandb_run_name and "VariableTrajLength" in wandb_run_name:
+                    wandb_run_name = wandb_run_name.replace("VariableTrajLength", f"FixedTrajLength{args.fixed_trajectory_length}")
+                else:
+                    wandb_run_name = f"{wandb_run_name}_FixedTrajLength{args.fixed_trajectory_length}" if wandb_run_name else f"FixedTrajLength{args.fixed_trajectory_length}"
             if args.ablation:
                 wandb_run_name = f"{wandb_run_name}_ablation-{args.ablation}" if wandb_run_name else f"ablation-{args.ablation}"
             logger = WandbLogger(
@@ -1658,6 +1705,8 @@ def main():
                 'num_decoder_blocks': args.num_decoder_blocks,
                 'diffusion_steps': args.diffusion_steps,
                 'epochs': args.epochs,
+                'fixed_trajectory_length': args.fixed_trajectory_length,
+                'trajectory_length_training_options': list(traj_length_options),
             })
             print(f"Initialized W&B logging: project={args.wandb_project}")
     
@@ -1665,9 +1714,10 @@ def main():
     callbacks = []
     
     ablation_tag = f"_ablation-{args.ablation}" if args.ablation else ""
+    length_tag = f"FixedTrajLength{args.fixed_trajectory_length}" if args.fixed_trajectory_length else "VariableTrajLength"
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename=f'trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions{ablation_tag}:{{epoch:03d}}_val_loss:{{val_loss:.4f}}',
+        filename=f'trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&{length_tag}&UniformContext&EncoderNone&DecoderAttentions{ablation_tag}:{{epoch:03d}}_val_loss:{{val_loss:.4f}}',
         every_n_epochs=10,  # Save checkpoint every 10 epochs
     )
     callbacks.append(checkpoint_callback)

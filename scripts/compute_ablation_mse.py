@@ -53,6 +53,7 @@ def compute_single_mse(args_tuple):
 
     # MuJoCo reconstruction
     model = mujoco.MjModel.from_xml_path(XML_PATH)
+    model.opt.timestep = dt  # Set correct simulation timestep
     data = mujoco.MjData(model)
 
     # Compute initial velocity from initial momentum: v = M^{-1} @ p
