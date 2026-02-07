@@ -58,7 +58,7 @@ SYSTEM_CONFIGS = {
     },
     '3dof': {
         'dpf_ckpt': project_root / 'checkpoints' / 'trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions:epoch=2999_val_loss:val_loss=0.0010.ckpt',
-        'hnn_ckpt': project_root / 'checkpoints' / 'SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt',
+        'hnn_ckpt': project_root / 'checkpoints' / 'StructuredHNN-dim256-epoch-epoch=549.ckpt',
         'xml_path': str(project_root / 'configs' / 'rigid_arm_hinge.xml'),
         'qpos_dim': 3,
         'torque_dim': 3,

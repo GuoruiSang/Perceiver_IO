@@ -644,27 +644,37 @@ def compute_hnn_physics_energy(
         dot_qpos = central_difference(seq_qpos, dt)
         dot_mom = central_difference(seq_mom, dt)
 
-    # Compute HNN predictions
-    seq_mom_grad = seq_mom.detach().clone().requires_grad_(True)
-    seq_qpos_grad = seq_qpos.detach().clone().requires_grad_(True)
+    # Compute HNN predictions (flatten [B, T, dim] → [B*T, dim] for StructuredHNN compatibility)
+    B, T, _ = seq_mom.shape
+    seq_mom_flat = seq_mom.detach().clone().reshape(B * T, -1).requires_grad_(True)
+    seq_qpos_flat = seq_qpos.detach().clone().reshape(B * T, -1).requires_grad_(True)
 
-    H = hnn(seq_mom_grad, seq_qpos_grad)
+    H = hnn(seq_mom_flat, seq_qpos_flat)  # [B*T, 1]
 
     dH_dp, dH_dq = torch.autograd.grad(
         H.sum(),
-        (seq_mom_grad, seq_qpos_grad),
+        (seq_mom_flat, seq_qpos_flat),
         create_graph=True
     )
+
+    # Reshape gradients back to [B, T, dim]
+    dH_dp = dH_dp.reshape(B, T, -1)
+    dH_dq = dH_dq.reshape(B, T, -1)
 
     # HNN predictions for dynamics
     dot_qpos_pred = dH_dp                    # dq/dt = dH/dp
     dot_mom_pred = -dH_dq + seq_torque       # dp/dt = -dH/dq + torque
 
-    # Energy = e1 + e2
-    e1 = nn.functional.mse_loss(dot_qpos, dot_qpos_pred)
-    e2 = nn.functional.mse_loss(dot_mom, dot_mom_pred)
+    # Per-dimension normalized residual: r_d² / var_d, summed over all dimensions
+    var_dq = hnn.qvel_var + 1e-8       # [qpos_dim]
+    var_dp = hnn.mom_dot_var + 1e-8    # [mom_dim]
 
-    return e1 + e2
+    r = torch.cat([
+        (dot_qpos - dot_qpos_pred) ** 2 / var_dq,
+        (dot_mom - dot_mom_pred) ** 2 / var_dp,
+    ], dim=-1)  # [B, T, qpos_dim + mom_dim]
+
+    return r.sum(dim=-1).mean()  # sum over dims, mean over B×T
 
 
 from tqdm import trange
@@ -728,6 +738,7 @@ def run_adam_optimization_hnn(
     num_steps: int,
     lr: float = 1e-3,
     use_forward_diff: bool = False,
+    optimize_target: str = "both",
 ) -> torch.Tensor:
     """
     Optimize trajectory using Adam with HNN physics consistency energy.
@@ -742,32 +753,47 @@ def run_adam_optimization_hnn(
         num_steps: Number of optimization steps
         lr: Learning rate for Adam optimizer
         use_forward_diff: if True, use forward difference; else use central difference
+        optimize_target: 'both', 'q' (position only), or 'p' (momentum only)
 
     Returns:
         Optimized state tensor [B, T, qpos_dim + mom_dim]
     """
-    seq_qpos = nn.Parameter(x[:, :, :qpos_dim].clone())
-    seq_mom = nn.Parameter(x[:, :, qpos_dim:qpos_dim + mom_dim].clone())
+    B = x.shape[0]
+    results = []
 
-    optimizer = torch.optim.Adam([seq_qpos, seq_mom], lr=lr)
+    for b in trange(B, desc='Running Adam Optimization (per-sample)'):
+        xb = x[b:b+1]          # [1, T, state_dim]
+        tb = seq_torque[b:b+1]  # [1, T, torque_dim]
 
-    for i in trange(num_steps, desc='Running Adam Optimization'):
-        optimizer.zero_grad()
+        if optimize_target == 'q':
+            qb = nn.Parameter(xb[:, :, :qpos_dim].clone())
+            pb = xb[:, :, qpos_dim:qpos_dim + mom_dim].clone()
+            params = [qb]
+        elif optimize_target == 'p':
+            qb = xb[:, :, :qpos_dim].clone()
+            pb = nn.Parameter(xb[:, :, qpos_dim:qpos_dim + mom_dim].clone())
+            params = [pb]
+        else:
+            qb = nn.Parameter(xb[:, :, :qpos_dim].clone())
+            pb = nn.Parameter(xb[:, :, qpos_dim:qpos_dim + mom_dim].clone())
+            params = [qb, pb]
 
-        energy = compute_hnn_physics_energy(
-            seq_qpos, seq_mom, seq_torque, hnn, dt,
-            use_forward_diff=use_forward_diff,
-        )
+        optimizer = torch.optim.Adam(params, lr=lr)
 
-        if i == 0 or i == num_steps - 1:
-            print(f'HNN Energy: {energy.item():.6f}')
+        for i in range(num_steps):
+            optimizer.zero_grad()
+            energy = compute_hnn_physics_energy(
+                qb, pb, tb, hnn, dt,
+                use_forward_diff=use_forward_diff,
+            )
+            if b == 0 and (i == 0 or i == num_steps - 1):
+                print(f'  sample 0 HNN Energy: {energy.item():.6f}')
+            energy.backward()
+            optimizer.step()
 
-        energy.backward()
-        optimizer.step()
+        results.append(torch.cat([qb.data, pb.data], dim=-1))
 
-    new_x = torch.cat([seq_qpos.data, seq_mom.data], dim=-1)
-
-    return new_x
+    return torch.cat(results, dim=0)
 
 def compare_generated_with_reconstructed(
     generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, data_dt: float = None, name: str = None

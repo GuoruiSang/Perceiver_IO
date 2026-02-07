@@ -31,24 +31,25 @@ from compute_ablation_2dof_with_smoothing import (
 # ============================================================
 # CONFIG — 改这里，然后直接运行脚本
 # ============================================================
-SYSTEM          = '3dof'        # '2dof' or '3dof'
-POLICY          = 'sinusoidal'  # 'sinusoidal', 'gp', 'zero', 'spline'
+SYSTEM          = '2dof'        # '2dof' or '3dof'
+POLICY          = 'spline'  # 'sinusoidal', 'gp', 'zero', 'spline'
 LENGTH          = 1000           # 轨迹长度
-NUM_SAMPLES     = 25            # 样本数 (小值快速迭代)
-SEED            = 3425            # 随机种子
+NUM_SAMPLES     = 1            # 样本数 (小值快速迭代)
+SEED            = 345            # 随机种子
 DEVICE          = 'cuda:4'      # GPU 设备
 
 # 平滑
 SMOOTH_SIGMA          = 0           # 高斯平滑 sigma (0=关闭)
 SMOOTH_GUIDANCE_ONLY  = False       # True=只在guidance能量计算时平滑，输出不平滑
-SMOOTH_LAST_STEP_ONLY = True       # True=只在最后一步扩散时平滑
+SMOOTH_LAST_STEP_ONLY = False       # True=只在最后一步扩散时平滑
 
 # Guidance (None = 用 SYSTEM_CONFIGS 里的系统默认值)
-GUIDANCE_METHOD = 'adam'        # 'adam', 'langevin', 'adam_integration'
-GUIDANCE_STEPS  = 10          # 优化步数/每个 guidance-active 扩散步
+GUIDANCE_METHOD    = 'adam'        # 'adam', 'langevin', 'adam_integration'
+OPTIMIZE_TARGET    = 'both'       # 'both', 'q' (只优化位置), 'p' (只优化动量)
+GUIDANCE_STEPS  = 200          # 优化步数/每个 guidance-active 扩散步
 GUIDANCE_LR     = 0.001          # Adam 学习率 (adam/adam_integration 用)
-GUIDANCE_AFTER  = 10          # 第 N 步扩散后开始 guidance
-GUIDANCE_BEFORE = 20          # 第 N 步扩散前停止 guidance
+GUIDANCE_AFTER  = 95          # 第 N 步扩散后开始 guidance
+GUIDANCE_BEFORE = 100         # 第 N 步扩散前停止 guidance
 # Langevin 专用
 LANGEVIN_STEP_SIZE   = 1e-5    # Langevin 步长
 LANGEVIN_NOISE_SCALE = 1e-6    # Langevin 噪声尺度
@@ -56,7 +57,7 @@ LANGEVIN_NOISE_SCALE = 1e-6    # Langevin 噪声尺度
 CHUNK_LENGTH    = 15            # 积分 chunk 长度
 
 # 扩散
-NUM_DIFFUSION_STEPS = 20      # DDIM 总步数 (None=模型默认 ~50)
+NUM_DIFFUSION_STEPS = 100      # DDIM 总步数 (None=模型默认 ~50)
 USE_FORWARD_DIFF    = True     # True=前向差分, False=中心差分
 # ============================================================
 
@@ -179,6 +180,13 @@ def plot_trajectories(ung_states, ung_torques, gui_states, gui_torques,
         ax.set_title(f'guided mom[{d}]')
         ax.legend(markerscale=5, fontsize=7)
 
+    # Sync y-axis between unguided (row1) and guided (row2) for each column
+    for col in range(ncols):
+        ymin = min(axes[1, col].get_ylim()[0], axes[2, col].get_ylim()[0])
+        ymax = max(axes[1, col].get_ylim()[1], axes[2, col].get_ylim()[1])
+        axes[1, col].set_ylim(ymin, ymax)
+        axes[2, col].set_ylim(ymin, ymax)
+
     fig.suptitle(
         f'Sample {idx}  |  NMSE_q: ung={ung_nq[idx]:.6f}, gui={gui_nq[idx]:.6f}',
         fontsize=14, y=1.02)
@@ -225,7 +233,7 @@ def main():
     print(f"{'='*64}")
     print(f"Quick Eval: {SYSTEM} | {POLICY} | L={LENGTH} | N={NUM_SAMPLES} | seed={SEED}")
     print(f"{'-'*64}")
-    print(f"Guidance: method={GUIDANCE_METHOD}  steps={guidance_steps}  lr={guidance_lr}  after={guidance_after}  before={guidance_before}")
+    print(f"Guidance: method={GUIDANCE_METHOD}  target={OPTIMIZE_TARGET}  steps={guidance_steps}  lr={guidance_lr}  after={guidance_after}  before={guidance_before}")
     if GUIDANCE_METHOD == 'langevin':
         print(f"  Langevin: step_size={LANGEVIN_STEP_SIZE}  noise_scale={LANGEVIN_NOISE_SCALE}")
     elif GUIDANCE_METHOD == 'adam_integration':
@@ -256,6 +264,7 @@ def main():
         hnn=hnn, guidance_method=GUIDANCE_METHOD,
         guidance_steps=guidance_steps, guidance_lr=guidance_lr,
         guidance_after_steps=guidance_after, guidance_before_steps=guidance_before,
+        optimize_target=OPTIMIZE_TARGET,
         smooth_sigma=SMOOTH_SIGMA, smooth_guidance_only=SMOOTH_GUIDANCE_ONLY,
         smooth_last_step_only=SMOOTH_LAST_STEP_ONLY,
         use_forward_diff=USE_FORWARD_DIFF,
