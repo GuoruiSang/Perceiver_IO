@@ -31,11 +31,11 @@ from compute_ablation_2dof_with_smoothing import (
 # ============================================================
 # CONFIG — 改这里，然后直接运行脚本
 # ============================================================
-SYSTEM          = '2dof'        # '2dof' or '3dof'
-POLICY          = 'spline'  # 'sinusoidal', 'gp', 'zero', 'spline'
+SYSTEM          = '3dof'        # '2dof' or '3dof'
+POLICY          = 'gp'  # 'sinusoidal', 'gp', 'zero', 'spline'
 LENGTH          = 1000           # 轨迹长度
-NUM_SAMPLES     = 1            # 样本数 (小值快速迭代)
-SEED            = 345            # 随机种子
+NUM_SAMPLES     = 16            # 样本数 (小值快速迭代)
+SEED            = 65            # 随机种子
 DEVICE          = 'cuda:4'      # GPU 设备
 
 # 平滑
@@ -46,18 +46,18 @@ SMOOTH_LAST_STEP_ONLY = False       # True=只在最后一步扩散时平滑
 # Guidance (None = 用 SYSTEM_CONFIGS 里的系统默认值)
 GUIDANCE_METHOD    = 'adam'        # 'adam', 'langevin', 'adam_integration'
 OPTIMIZE_TARGET    = 'both'       # 'both', 'q' (只优化位置), 'p' (只优化动量)
-GUIDANCE_STEPS  = 200          # 优化步数/每个 guidance-active 扩散步
-GUIDANCE_LR     = 0.001          # Adam 学习率 (adam/adam_integration 用)
-GUIDANCE_AFTER  = 95          # 第 N 步扩散后开始 guidance
-GUIDANCE_BEFORE = 100         # 第 N 步扩散前停止 guidance
+GUIDANCE_STEPS  = 100          # 优化步数/每个 guidance-active 扩散步
+GUIDANCE_LR     = 0.01          # Adam 学习率 (adam/adam_integration 用)
+GUIDANCE_AFTER  = 15          # 第 N 步扩散后开始 guidance
+GUIDANCE_BEFORE = 20         # 第 N 步扩散前停止 guidance
 # Langevin 专用
-LANGEVIN_STEP_SIZE   = 1e-5    # Langevin 步长
-LANGEVIN_NOISE_SCALE = 1e-6    # Langevin 噪声尺度
+LANGEVIN_STEP_SIZE   = 1e-6    # Langevin 步长
+LANGEVIN_NOISE_SCALE = 1e-5    # Langevin 噪声尺度
 # adam_integration 专用
 CHUNK_LENGTH    = 15            # 积分 chunk 长度
 
 # 扩散
-NUM_DIFFUSION_STEPS = 100      # DDIM 总步数 (None=模型默认 ~50)
+NUM_DIFFUSION_STEPS = 20      # DDIM 总步数 (None=模型默认 ~50)
 USE_FORWARD_DIFF    = True     # True=前向差分, False=中心差分
 # ============================================================
 
@@ -152,31 +152,37 @@ def plot_trajectories(ung_states, ung_torques, gui_states, gui_torques,
     for d in range(torque_dim, ncols):
         axes[0, d].set_visible(False)
 
-    # Row 1: Unguided vs GT
+    # Prepend initial state to MuJoCo reconstruction so both start from t=0
+    ung_gt_qpos = np.concatenate([[ung_s[0, :qpos_dim]], ung_recon['seq_qpos']], axis=0)
+    ung_gt_mom = np.concatenate([[ung_s[0, qpos_dim:]], ung_recon['seq_mom']], axis=0)
+    gui_gt_qpos = np.concatenate([[gui_s[0, :qpos_dim]], gui_recon['seq_qpos']], axis=0)
+    gui_gt_mom = np.concatenate([[gui_s[0, qpos_dim:]], gui_recon['seq_mom']], axis=0)
+
+    # Row 1: Unguided vs GT (both from t=0)
     for d in range(qpos_dim):
         ax = axes[1, d]
-        ax.scatter(range(len(ung_s[1:])), ung_s[1:, d], s=1, c='blue', alpha=0.7, label='Generated')
-        ax.scatter(range(len(ung_recon['seq_qpos'])), ung_recon['seq_qpos'][:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
+        ax.scatter(range(len(ung_s)), ung_s[:, d], s=1, c='blue', alpha=0.7, label='Generated')
+        ax.scatter(range(len(ung_gt_qpos)), ung_gt_qpos[:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
         ax.set_title(f'unguided qpos[{d}]')
         ax.legend(markerscale=5, fontsize=7)
     for d in range(mom_dim):
         ax = axes[1, qpos_dim + d]
-        ax.scatter(range(len(ung_s[1:])), ung_s[1:, qpos_dim + d], s=1, c='blue', alpha=0.7, label='Generated')
-        ax.scatter(range(len(ung_recon['seq_mom'])), ung_recon['seq_mom'][:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
+        ax.scatter(range(len(ung_s)), ung_s[:, qpos_dim + d], s=1, c='blue', alpha=0.7, label='Generated')
+        ax.scatter(range(len(ung_gt_mom)), ung_gt_mom[:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
         ax.set_title(f'unguided mom[{d}]')
         ax.legend(markerscale=5, fontsize=7)
 
-    # Row 2: Guided vs GT
+    # Row 2: Guided vs GT (both from t=0)
     for d in range(qpos_dim):
         ax = axes[2, d]
-        ax.scatter(range(len(gui_s[1:])), gui_s[1:, d], s=1, c='blue', alpha=0.7, label='Generated')
-        ax.scatter(range(len(gui_recon['seq_qpos'])), gui_recon['seq_qpos'][:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
+        ax.scatter(range(len(gui_s)), gui_s[:, d], s=1, c='blue', alpha=0.7, label='Generated')
+        ax.scatter(range(len(gui_gt_qpos)), gui_gt_qpos[:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
         ax.set_title(f'guided qpos[{d}]')
         ax.legend(markerscale=5, fontsize=7)
     for d in range(mom_dim):
         ax = axes[2, qpos_dim + d]
-        ax.scatter(range(len(gui_s[1:])), gui_s[1:, qpos_dim + d], s=1, c='blue', alpha=0.7, label='Generated')
-        ax.scatter(range(len(gui_recon['seq_mom'])), gui_recon['seq_mom'][:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
+        ax.scatter(range(len(gui_s)), gui_s[:, qpos_dim + d], s=1, c='blue', alpha=0.7, label='Generated')
+        ax.scatter(range(len(gui_gt_mom)), gui_gt_mom[:, d], s=1, c='red', alpha=0.7, label='MuJoCo GT')
         ax.set_title(f'guided mom[{d}]')
         ax.legend(markerscale=5, fontsize=7)
 
@@ -307,31 +313,34 @@ def main():
 
     # Print results
     print(f"\n{'='*80}")
-    print(f"{'':>14} {'median':>10} {'mean':>10} {'std':>10} {'p25':>10} {'p95':>10}")
+    print(f"{'':>14} {'mean':>10} {'std':>10} {'p25':>10} {'median':>10} {'p75':>10} {'p99':>10}")
     print(f"{'-'*80}")
     for label, ung_arr, gui_arr in [
         ('NMSE_q', ung_nq, gui_nq),
         ('NMSE_p', ung_np, gui_np),
         ('HamRes', ung_hr, gui_hr),
     ]:
-        u_med = np.median(ung_arr)
         u_mean = np.mean(ung_arr)
         u_std = np.std(ung_arr)
         u_p25 = np.percentile(ung_arr, 25)
-        u_p95 = np.percentile(ung_arr, 95)
-        g_med = np.median(gui_arr)
+        u_med = np.median(ung_arr)
+        u_p75 = np.percentile(ung_arr, 75)
+        u_p99 = np.percentile(ung_arr, 99)
         g_mean = np.mean(gui_arr)
         g_std = np.std(gui_arr)
         g_p25 = np.percentile(gui_arr, 25)
-        g_p95 = np.percentile(gui_arr, 95)
-        print(f"{label:>8} ung {u_med:>10.6f} {u_mean:>10.6f} {u_std:>10.6f} {u_p25:>10.6f} {u_p95:>10.6f}")
-        print(f"{'':>8} gui {g_med:>10.6f} {g_mean:>10.6f} {g_std:>10.6f} {g_p25:>10.6f} {g_p95:>10.6f}")
-        # Delta and ratio (median-based)
-        delta = g_med - u_med
-        eps = 1e-12
-        ratio = g_med / (u_med + eps)
-        better = "better" if delta < 0 else "WORSE"
-        print(f"{'':>8}   Δ {delta:>+10.6f}  ratio={ratio:.4f}  ({better})")
+        g_med = np.median(gui_arr)
+        g_p75 = np.percentile(gui_arr, 75)
+        g_p99 = np.percentile(gui_arr, 99)
+        print(f"{label:>8} ung {u_mean:>10.6f} {u_std:>10.6f} {u_p25:>10.6f} {u_med:>10.6f} {u_p75:>10.6f} {u_p99:>10.6f}")
+        print(f"{'':>8} gui {g_mean:>10.6f} {g_std:>10.6f} {g_p25:>10.6f} {g_med:>10.6f} {g_p75:>10.6f} {g_p99:>10.6f}")
+        d_mean = g_mean - u_mean
+        d_std = g_std - u_std
+        d_p25 = g_p25 - u_p25
+        d_med = g_med - u_med
+        d_p75 = g_p75 - u_p75
+        d_p99 = g_p99 - u_p99
+        print(f"{'':>8}   Δ {d_mean:>+10.6f} {d_std:>+10.6f} {d_p25:>+10.6f} {d_med:>+10.6f} {d_p75:>+10.6f} {d_p99:>+10.6f}")
     print(f"{'='*80}")
     print(f"Timing: unguided={t_ung:.1f}s  guided={t_gui:.1f}s  metrics={t_met:.1f}s")
 

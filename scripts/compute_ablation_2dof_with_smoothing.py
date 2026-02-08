@@ -58,7 +58,7 @@ SYSTEM_CONFIGS = {
     },
     '3dof': {
         'dpf_ckpt': project_root / 'checkpoints' / 'trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions:epoch=2999_val_loss:val_loss=0.0010.ckpt',
-        'hnn_ckpt': project_root / 'checkpoints' / 'StructuredHNN-dim256-epoch-epoch=549.ckpt',
+        'hnn_ckpt': project_root / 'checkpoints' / 'StructuredHNN-dim256-epoch-epoch=749.ckpt',
         'xml_path': str(project_root / 'configs' / 'rigid_arm_hinge.xml'),
         'qpos_dim': 3,
         'torque_dim': 3,
@@ -124,8 +124,8 @@ def compute_nmse(state, torque, mj_model, qpos_dim, dt=DT, sim_dt=SIM_DT):
     # Per-dimension MSE (mean over time), then average across dimensions
     mse_q_per_dim = ((qpos[1:T_min+1] - gt_qpos[:T_min]) ** 2).mean(axis=0)
     mse_p_per_dim = ((mom[1:T_min+1] - gt_mom[:T_min]) ** 2).mean(axis=0)
-    var_q_per_dim = np.var(qpos[1:T_min+1], axis=0)
-    var_p_per_dim = np.var(mom[1:T_min+1], axis=0)
+    var_q_per_dim = np.var(gt_qpos[:T_min], axis=0)
+    var_p_per_dim = np.var(gt_mom[:T_min], axis=0)
     nmse_q_per_dim = np.where(var_q_per_dim > 1e-12, mse_q_per_dim / var_q_per_dim, 0.0)
     nmse_p_per_dim = np.where(var_p_per_dim > 1e-12, mse_p_per_dim / var_p_per_dim, 0.0)
     return float(nmse_q_per_dim.mean()), float(nmse_p_per_dim.mean()), nmse_q_per_dim, nmse_p_per_dim

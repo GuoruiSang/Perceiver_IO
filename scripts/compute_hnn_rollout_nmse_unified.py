@@ -48,7 +48,7 @@ SYSTEM_CONFIGS = {
         'torque_dim': 2,
     },
     '3dof': {
-        'hnn_ckpt': project_root / 'checkpoints' / 'SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt',
+        'hnn_ckpt': project_root / 'checkpoints' / 'StructuredHNN-dim256-epoch-epoch=749.ckpt',
         'xml_path': str(project_root / 'configs' / 'rigid_arm_hinge.xml'),
         'traj_dir': project_root / 'output_ablation' / 'trajectories' / 'original',
         'output_dir': project_root / 'output_ablation' / 'results' / '3dof_smoothed',
@@ -59,9 +59,9 @@ SYSTEM_CONFIGS = {
 
 
 def compute_nmse(generated, reconstructed):
-    """NMSE = MSE / var(generated)."""
+    """NMSE = MSE / var(reconstructed)."""
     mse = np.mean((generated - reconstructed) ** 2)
-    var = np.var(generated)
+    var = np.var(reconstructed)
     return mse / var if var > 1e-12 else 0.0
 
 

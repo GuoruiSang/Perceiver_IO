@@ -1029,14 +1029,13 @@ class TrajectoryDPF(pl.LightningModule):
                             x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             use_forward_diff=use_forward_diff,
-
                             optimize_target=optimize_target,
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
                             x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale,
-
+                            optimize_target=optimize_target,
                         )
                     elif guidance_method == "adam_integration":
                         x0_phys = run_adam_optimization_hnn_integration(
@@ -1079,14 +1078,13 @@ class TrajectoryDPF(pl.LightningModule):
                             x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             use_forward_diff=use_forward_diff,
-
                             optimize_target=optimize_target,
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
                             x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale,
-
+                            optimize_target=optimize_target,
                         )
                     elif guidance_method == "adam_integration":
                         x0_phys = run_adam_optimization_hnn_integration(

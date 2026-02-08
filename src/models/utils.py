@@ -689,6 +689,7 @@ def run_langevin_dynamics_hnn(
     num_steps: int,
     step_size: float,
     noise_scale: float,
+    optimize_target: str = "both",
 ) -> torch.Tensor:
     """
     Refine trajectory using Langevin dynamics with HNN physics energy.
@@ -703,12 +704,15 @@ def run_langevin_dynamics_hnn(
         num_steps: Number of Langevin steps
         step_size: Step size for gradient descent
         noise_scale: Scale of injected noise
+        optimize_target: 'both', 'q', 'p', or 'alternating'
 
     Returns:
         Refined state tensor [B, T, qpos_dim + mom_dim]
     """
     seq_qpos = x[:, :, :qpos_dim].clone().requires_grad_(True)
     seq_mom = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().requires_grad_(True)
+
+    half = num_steps // 2
 
     for i in trange(num_steps, desc='Running Langevin Dynamics'):
         energy = compute_hnn_physics_energy(seq_qpos, seq_mom, seq_torque, hnn, dt)
@@ -718,8 +722,18 @@ def run_langevin_dynamics_hnn(
         grad_qpos, grad_mom = torch.autograd.grad(energy, [seq_qpos, seq_mom])
 
         noise_std = (2 * step_size * noise_scale) ** 0.5
-        seq_qpos = seq_qpos - step_size * grad_qpos + noise_std * torch.randn_like(seq_qpos)
-        seq_mom = seq_mom - step_size * grad_mom + noise_std * torch.randn_like(seq_mom)
+
+        if optimize_target == 'alternating':
+            update_q = (i < half)
+            update_p = (i >= half)
+        else:
+            update_q = optimize_target in ('both', 'q')
+            update_p = optimize_target in ('both', 'p')
+
+        if update_q:
+            seq_qpos = seq_qpos - step_size * grad_qpos + noise_std * torch.randn_like(seq_qpos)
+        if update_p:
+            seq_mom = seq_mom - step_size * grad_mom + noise_std * torch.randn_like(seq_mom)
 
         seq_qpos = seq_qpos.detach().requires_grad_(True)
         seq_mom = seq_mom.detach().requires_grad_(True)
@@ -765,7 +779,34 @@ def run_adam_optimization_hnn(
         xb = x[b:b+1]          # [1, T, state_dim]
         tb = seq_torque[b:b+1]  # [1, T, torque_dim]
 
-        if optimize_target == 'q':
+        if optimize_target == 'alternating':
+            # Phase 1: optimize q only
+            qb = nn.Parameter(xb[:, :, :qpos_dim].clone())
+            pb = xb[:, :, qpos_dim:qpos_dim + mom_dim].clone()
+            opt_q = torch.optim.Adam([qb], lr=lr)
+            half = num_steps // 2
+            for i in range(half):
+                opt_q.zero_grad()
+                energy = compute_hnn_physics_energy(
+                    qb, pb, tb, hnn, dt, use_forward_diff=use_forward_diff)
+                if b == 0 and (i == 0 or i == half - 1):
+                    print(f'  sample 0 Phase1(q) Energy: {energy.item():.6f}')
+                energy.backward()
+                opt_q.step()
+            # Phase 2: optimize p only, freeze q
+            qb_frozen = qb.data.clone()
+            pb = nn.Parameter(pb.clone())
+            opt_p = torch.optim.Adam([pb], lr=lr)
+            for i in range(num_steps - half):
+                opt_p.zero_grad()
+                energy = compute_hnn_physics_energy(
+                    qb_frozen, pb, tb, hnn, dt, use_forward_diff=use_forward_diff)
+                if b == 0 and (i == 0 or i == num_steps - half - 1):
+                    print(f'  sample 0 Phase2(p) Energy: {energy.item():.6f}')
+                energy.backward()
+                opt_p.step()
+            qb = qb_frozen
+        elif optimize_target == 'q':
             qb = nn.Parameter(xb[:, :, :qpos_dim].clone())
             pb = xb[:, :, qpos_dim:qpos_dim + mom_dim].clone()
             params = [qb]
@@ -778,18 +819,18 @@ def run_adam_optimization_hnn(
             pb = nn.Parameter(xb[:, :, qpos_dim:qpos_dim + mom_dim].clone())
             params = [qb, pb]
 
-        optimizer = torch.optim.Adam(params, lr=lr)
-
-        for i in range(num_steps):
-            optimizer.zero_grad()
-            energy = compute_hnn_physics_energy(
-                qb, pb, tb, hnn, dt,
-                use_forward_diff=use_forward_diff,
-            )
-            if b == 0 and (i == 0 or i == num_steps - 1):
-                print(f'  sample 0 HNN Energy: {energy.item():.6f}')
-            energy.backward()
-            optimizer.step()
+        if optimize_target != 'alternating':
+            optimizer = torch.optim.Adam(params, lr=lr)
+            for i in range(num_steps):
+                optimizer.zero_grad()
+                energy = compute_hnn_physics_energy(
+                    qb, pb, tb, hnn, dt,
+                    use_forward_diff=use_forward_diff,
+                )
+                if b == 0 and (i == 0 or i == num_steps - 1):
+                    print(f'  sample 0 HNN Energy: {energy.item():.6f}')
+                energy.backward()
+                optimizer.step()
 
         results.append(torch.cat([qb.data, pb.data], dim=-1))
 

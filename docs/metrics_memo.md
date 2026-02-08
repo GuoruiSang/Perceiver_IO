@@ -26,13 +26,13 @@ where:
 NMSE measures trajectory accuracy relative to MuJoCo physics reconstruction, computed **per-dimension** then averaged:
 
 ```
-NMSE_q = mean_d( MSE_t(q_gen[:,d], q_recon[:,d]) / Var_t(q_gen[:,d]) )
-NMSE_p = mean_d( MSE_t(p_gen[:,d], p_recon[:,d]) / Var_t(p_gen[:,d]) )
+NMSE_q = mean_d( MSE_t(q_gen[:,d], q_recon[:,d]) / Var_t(q_recon[:,d]) )
+NMSE_p = mean_d( MSE_t(p_gen[:,d], p_recon[:,d]) / Var_t(p_recon[:,d]) )
 
 where:
   d: dimension index (e.g. 0,1,2 for 3DoF)
   MSE_t: mean squared error over time axis
-  Var_t: variance over time axis
+  Var_t: variance over time axis (of GT reconstruction)
   q_gen, p_gen: generated trajectory (position, momentum)
   q_recon, p_recon: MuJoCo reconstructed trajectory from initial state + torques
 ```
@@ -85,7 +85,7 @@ python scripts/plot_nmse_combined.py
 | | 2DoF | 3DoF |
 |---|---|---|
 | DPF checkpoint | `checkpoints/2dof/trajectory_dpf_...val_loss=0.0008.ckpt` | `checkpoints/trajectory_dpf_...val_loss=0.0010.ckpt` |
-| HNN checkpoint | `checkpoints/2dof/SeperableHNN-2DOF-epoch-epoch=999.ckpt` | `checkpoints/SeperableHNN(dim1024)-CELU-epoch-epoch=999.ckpt` |
+| HNN checkpoint | `checkpoints/2dof/SeperableHNN-2DOF-epoch-epoch=999.ckpt` | `checkpoints/StructuredHNN-dim256-epoch-epoch=749.ckpt` |
 | MuJoCo XML | `configs/rigid_arm_hinge_2dof.xml` | `configs/rigid_arm_hinge.xml` |
 | qpos_dim | 2 | 3 |
 | guidance_steps | 10 | 25 |
