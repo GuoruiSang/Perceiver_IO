@@ -3,20 +3,35 @@
 ## 1. HamRes (Hamiltonian Residual)
 
 ### Definition
-HamRes measures how well a trajectory satisfies Hamilton's equations:
+HamRes measures how well a trajectory satisfies Hamilton's equations, using a robust formulation:
 
 ```
-HamRes = MSE(r_q) / Var(dq) + MSE(r_p) / Var(dp)
+r_q = dq/dt - dH/dp
+r_p = dp/dt - (-dH/dq + τ)
 
-where:
-  r_q = dq/dt - dH/dp        (position residual)
-  r_p = dp/dt - (-dH/dq + τ) (momentum residual)
+r_q_norm[d] = r_q[d] / (scale_q[d] + eps_q)
+r_p_norm[d] = r_p[d] / (scale_p[d] + eps_p)
+
+rho(x) = delta^2 * (sqrt(1 + (x / delta)^2) - 1)   # pseudo-Huber
+
+HamRes_t = mean_d( rho(r_q_norm[d]) + rho(r_p_norm[d]) )
+HamRes = median_t( HamRes_t )
 ```
 
-- `dq/dt`, `dp/dt`: central difference from trajectory
+- `dq/dt`, `dp/dt`: central difference from smoothed trajectory (`sigma=1.0` Gaussian by default)
 - `dH/dp`, `dH/dq`: autograd from pre-trained HNN
 - `τ`: external torque
-- `Var(dq)`, `Var(dp)`: normalization variances from HNN training data (`hnn.qvel_var`, `hnn.mom_dot_var`)
+- `scale_q`, `scale_p`: per-dimension normalization scales (prefer HNN training stats if per-dim; otherwise derivative std from current trajectory)
+- `eps_q`, `eps_p`: denominator floors (`1e-3` default)
+- `delta`: pseudo-Huber transition parameter (`1.0` default)
+
+### Why robust HamRes
+
+- Finite differences amplify small high-frequency noise in `q` and `p`.
+- Position and momentum channels often have different scales.
+- Squared-loss + mean aggregation can be dominated by a small number of spikes.
+
+The robust version (smoothing + per-dim normalization + pseudo-Huber + median over time) is much more stable for trajectory comparison.
 
 ---
 

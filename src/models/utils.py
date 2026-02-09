@@ -8,6 +8,7 @@ This module contains utility classes and functions used in the model implementat
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from perceiver.model.core import QueryProvider
 from einops import rearrange
 import pytorch_lightning as pl
@@ -612,6 +613,40 @@ def forward_difference(seq: torch.Tensor, dt: float) -> torch.Tensor:
     return seq_dot
 
 
+def _gaussian_smooth_time_3d(seq: torch.Tensor, sigma: float) -> torch.Tensor:
+    """Depthwise Gaussian smoothing over time for [B, T, D] tensors."""
+    if sigma <= 0:
+        return seq
+
+    radius = max(1, int(round(3.0 * sigma)))
+    x = torch.arange(-radius, radius + 1, device=seq.device, dtype=seq.dtype)
+    kernel = torch.exp(-0.5 * (x / sigma) ** 2)
+    kernel = kernel / kernel.sum()
+
+    # [B, T, D] -> [B, D, T] for grouped conv over time.
+    seq_bdt = seq.transpose(1, 2)
+    seq_pad = F.pad(seq_bdt, (radius, radius), mode="reflect")
+    weight = kernel.view(1, 1, -1).repeat(seq.shape[-1], 1, 1)
+    smoothed = F.conv1d(seq_pad, weight, groups=seq.shape[-1])
+    return smoothed.transpose(1, 2)
+
+
+def _pseudo_huber(x: torch.Tensor, delta: float) -> torch.Tensor:
+    return (delta ** 2) * (torch.sqrt(1.0 + (x / delta) ** 2) - 1.0)
+
+
+def _expand_var_to_dim(var_like, dim: int, device, dtype):
+    """Expand variance-like scalar/vector to per-dimension std; return None if unavailable."""
+    if var_like is None:
+        return None
+    var_t = torch.as_tensor(var_like, device=device, dtype=dtype).flatten()
+    if var_t.numel() == 1:
+        return torch.sqrt(torch.clamp(var_t.repeat(dim), min=0.0))
+    if var_t.numel() >= dim:
+        return torch.sqrt(torch.clamp(var_t[:dim], min=0.0))
+    return None
+
+
 def compute_hnn_physics_energy(
     seq_qpos: torch.Tensor,
     seq_mom: torch.Tensor,
@@ -621,63 +656,237 @@ def compute_hnn_physics_energy(
     use_forward_diff: bool = False,
 ) -> torch.Tensor:
     """
-    Compute HNN-based physics consistency energy for trajectory refinement.
+    Compute HNN-based physics consistency energy via 1-step prediction.
 
-    Energy = MSE(dq/dt, dH/dp) + MSE(dp/dt, -dH/dq + torque)
+    Uses HNN to predict (q_{t+1}, p_{t+1}) from (q_t, p_t) via symplectic Euler,
+    then compares with the actual next state in the trajectory.
+
+    E = (1/(T-1)) sum_t |q_{t+1} - q̂_{t+1}|² + |p_{t+1} - p̂_{t+1}|²
+
+    where:
+        q̂_{t+1} = q_t + dt * dH/dp(q_t, p_t)
+        p̂_{t+1} = p_t + dt * (-dH/dq(q_t, p_t) + τ_t)
 
     Args:
         seq_qpos: [B, T, qpos_dim] position trajectory
         seq_mom: [B, T, mom_dim] momentum trajectory
         seq_torque: [B, T, torque_dim] torque sequence
         hnn: Trained Hamiltonian Neural Network
-        dt: timestep for finite differences
-        use_forward_diff: if True, use forward difference; else use central difference
+        dt: timestep between trajectory points
+        use_forward_diff: unused (kept for API compatibility)
 
     Returns:
         energy: scalar energy value
     """
-    # Compute derivatives from trajectory
-    if use_forward_diff:
-        dot_qpos = forward_difference(seq_qpos, dt)
-        dot_mom = forward_difference(seq_mom, dt)
-    else:
-        dot_qpos = central_difference(seq_qpos, dt)
-        dot_mom = central_difference(seq_mom, dt)
-
-    # Compute HNN predictions (flatten [B, T, dim] → [B*T, dim] for StructuredHNN compatibility)
     B, T, _ = seq_mom.shape
-    seq_mom_flat = seq_mom.detach().clone().reshape(B * T, -1).requires_grad_(True)
-    seq_qpos_flat = seq_qpos.detach().clone().reshape(B * T, -1).requires_grad_(True)
 
-    H = hnn(seq_mom_flat, seq_qpos_flat)  # [B*T, 1]
+    # Use t=0..T-2 as "current" states
+    q_t = seq_qpos[:, :-1]   # [B, T-1, qpos_dim]
+    p_t = seq_mom[:, :-1]    # [B, T-1, mom_dim]
+    tau_t = seq_torque[:, :-1]  # [B, T-1, torque_dim]
+
+    # Actual next states
+    q_next = seq_qpos[:, 1:]  # [B, T-1, qpos_dim]
+    p_next = seq_mom[:, 1:]   # [B, T-1, mom_dim]
+
+    # Compute HNN gradients (flatten for StructuredHNN compatibility)
+    p_flat = p_t.reshape(-1, p_t.shape[-1]).detach().clone().requires_grad_(True)
+    q_flat = q_t.reshape(-1, q_t.shape[-1]).detach().clone().requires_grad_(True)
+
+    H = hnn(p_flat, q_flat)  # [B*(T-1), 1]
 
     dH_dp, dH_dq = torch.autograd.grad(
         H.sum(),
-        (seq_mom_flat, seq_qpos_flat),
+        (p_flat, q_flat),
         create_graph=True
     )
 
-    # Reshape gradients back to [B, T, dim]
-    dH_dp = dH_dp.reshape(B, T, -1)
-    dH_dq = dH_dq.reshape(B, T, -1)
+    # Reshape back to [B, T-1, dim]
+    dH_dp = dH_dp.reshape(B, T - 1, -1)
+    dH_dq = dH_dq.reshape(B, T - 1, -1)
 
-    # HNN predictions for dynamics
-    dot_qpos_pred = dH_dp                    # dq/dt = dH/dp
-    dot_mom_pred = -dH_dq + seq_torque       # dp/dt = -dH/dq + torque
+    # 1-step symplectic Euler prediction
+    q_pred = q_t + dt * dH_dp                    # q̂_{t+1}
+    p_pred = p_t + dt * (-dH_dq + tau_t)         # p̂_{t+1}
 
-    # Per-dimension normalized residual: r_d² / var_d, summed over all dimensions
-    var_dq = hnn.qvel_var + 1e-8       # [qpos_dim]
-    var_dp = hnn.mom_dot_var + 1e-8    # [mom_dim]
+    # MSE between predicted and actual next state
+    energy = ((q_next - q_pred) ** 2).sum(dim=-1) + ((p_next - p_pred) ** 2).sum(dim=-1)
+    return energy.mean()  # mean over B × (T-1)
 
-    r = torch.cat([
-        (dot_qpos - dot_qpos_pred) ** 2 / var_dq,
-        (dot_mom - dot_mom_pred) ** 2 / var_dp,
-    ], dim=-1)  # [B, T, qpos_dim + mom_dim]
 
-    return r.sum(dim=-1).mean()  # sum over dims, mean over B×T
+def compute_hnn_robust_hamres_energy(
+    seq_qpos: torch.Tensor,
+    seq_mom: torch.Tensor,
+    seq_torque: torch.Tensor,
+    hnn: nn.Module,
+    dt: float,
+    smooth_sigma: float = 1.0,
+    delta: float = 1.0,
+    min_scale_q: float = 1e-3,
+    min_scale_p: float = 1e-3,
+) -> torch.Tensor:
+    """
+    Robust HamRes-style differentiable energy for guidance.
+
+    Uses central-difference residuals with optional Gaussian smoothing, per-dimension
+    normalization, and pseudo-Huber penalty. Aggregates with mean over time for stable
+    gradients (evaluation can still use median aggregation).
+    """
+    B, T, _ = seq_qpos.shape
+    if T < 3:
+        # Keep graph-connected scalar.
+        return seq_qpos.new_zeros(())
+
+    q_use = _gaussian_smooth_time_3d(seq_qpos, smooth_sigma)
+    p_use = _gaussian_smooth_time_3d(seq_mom, smooth_sigma)
+
+    qdot = (q_use[:, 2:] - q_use[:, :-2]) / (2 * dt)
+    pdot = (p_use[:, 2:] - p_use[:, :-2]) / (2 * dt)
+    q_mid = q_use[:, 1:-1]
+    p_mid = p_use[:, 1:-1]
+    tau_mid = seq_torque[:, 1:-1]
+
+    # Same stop-grad convention as one-step guidance energy.
+    p_flat = p_mid.reshape(-1, p_mid.shape[-1]).detach().clone().requires_grad_(True)
+    q_flat = q_mid.reshape(-1, q_mid.shape[-1]).detach().clone().requires_grad_(True)
+    H = hnn(p_flat, q_flat)
+    dH_dp, dH_dq = torch.autograd.grad(H.sum(), (p_flat, q_flat), create_graph=True)
+    dH_dp = dH_dp.reshape(B, T - 2, -1)
+    dH_dq = dH_dq.reshape(B, T - 2, -1)
+
+    r_q = qdot - dH_dp
+    r_p = pdot - (-dH_dq + tau_mid)
+
+    q_dim, p_dim = r_q.shape[-1], r_p.shape[-1]
+    var_dq = getattr(hnn, "qvel_var", None)
+    var_dp = getattr(hnn, "mom_dot_var", None)
+    scale_q = _expand_var_to_dim(var_dq, q_dim, r_q.device, r_q.dtype)
+    scale_p = _expand_var_to_dim(var_dp, p_dim, r_p.device, r_p.dtype)
+    if scale_q is None:
+        scale_q = torch.sqrt(torch.clamp(qdot.var(dim=(0, 1), unbiased=False), min=0.0))
+    if scale_p is None:
+        scale_p = torch.sqrt(torch.clamp(pdot.var(dim=(0, 1), unbiased=False), min=0.0))
+    scale_q = torch.clamp(scale_q, min=min_scale_q)
+    scale_p = torch.clamp(scale_p, min=min_scale_p)
+
+    r_q_norm = r_q / scale_q.view(1, 1, -1)
+    r_p_norm = r_p / scale_p.view(1, 1, -1)
+
+    # Mean over dimensions then time then batch for smoother optimization.
+    per_t = _pseudo_huber(r_q_norm, delta).mean(dim=-1) + _pseudo_huber(r_p_norm, delta).mean(dim=-1)
+    return per_t.mean()
+
+
+def compute_hnn_guidance_energy(
+    seq_qpos: torch.Tensor,
+    seq_mom: torch.Tensor,
+    seq_torque: torch.Tensor,
+    hnn: nn.Module,
+    dt: float,
+    mode: str = "one_step",
+    use_forward_diff: bool = False,
+    hamres_smooth_sigma: float = 1.0,
+    hamres_delta: float = 1.0,
+    hamres_min_scale_q: float = 1e-3,
+    hamres_min_scale_p: float = 1e-3,
+) -> torch.Tensor:
+    if mode == "one_step":
+        return compute_hnn_physics_energy(
+            seq_qpos, seq_mom, seq_torque, hnn, dt, use_forward_diff=use_forward_diff
+        )
+    if mode == "robust_hamres":
+        return compute_hnn_robust_hamres_energy(
+            seq_qpos,
+            seq_mom,
+            seq_torque,
+            hnn,
+            dt,
+            smooth_sigma=hamres_smooth_sigma,
+            delta=hamres_delta,
+            min_scale_q=hamres_min_scale_q,
+            min_scale_p=hamres_min_scale_p,
+        )
+    raise ValueError(f"Unknown guidance energy mode: {mode}")
 
 
 from tqdm import trange
+
+
+def run_normalized_sgd_hnn(
+    x: torch.Tensor,
+    seq_torque: torch.Tensor,
+    qpos_dim: int,
+    mom_dim: int,
+    dt: float,
+    hnn: nn.Module,
+    num_steps: int,
+    alpha_q: float = 1e-4,
+    alpha_p: float = 1e-4,
+    guidance_energy_mode: str = "one_step",
+    guidance_hamres_smooth_sigma: float = 1.0,
+    guidance_hamres_delta: float = 1.0,
+    guidance_hamres_min_scale_q: float = 1e-3,
+    guidance_hamres_min_scale_p: float = 1e-3,
+    guidance_trust_lambda: float = 0.0,
+) -> torch.Tensor:
+    """
+    Refine trajectory using normalized SGD with separate step sizes for q and p.
+
+    Each step:
+        q ← q - α_q * ∇_q E / |∇_q E|
+        p ← p - α_p * ∇_p E / |∇_p E|
+
+    Args:
+        x: State tensor [B, T, qpos_dim + mom_dim]
+        seq_torque: Torque conditioning [B, T, torque_dim]
+        qpos_dim: Dimension of position
+        mom_dim: Dimension of momentum
+        dt: Timestep between trajectory points
+        hnn: Trained Hamiltonian Neural Network
+        num_steps: Number of optimization steps
+        alpha_q: Step size for position update
+        alpha_p: Step size for momentum update
+
+    Returns:
+        Refined state tensor [B, T, qpos_dim + mom_dim]
+    """
+    seq_qpos = x[:, :, :qpos_dim].clone().requires_grad_(True)
+    seq_mom = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().requires_grad_(True)
+    q_ref = x[:, :, :qpos_dim].clone().detach()
+    p_ref = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().detach()
+
+    for i in trange(num_steps, desc='Running Normalized SGD'):
+        energy = compute_hnn_guidance_energy(
+            seq_qpos,
+            seq_mom,
+            seq_torque,
+            hnn,
+            dt,
+            mode=guidance_energy_mode,
+            hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+            hamres_delta=guidance_hamres_delta,
+            hamres_min_scale_q=guidance_hamres_min_scale_q,
+            hamres_min_scale_p=guidance_hamres_min_scale_p,
+        )
+        if guidance_trust_lambda > 0:
+            energy = energy + guidance_trust_lambda * (
+                ((seq_qpos - q_ref) ** 2).mean() + ((seq_mom - p_ref) ** 2).mean()
+            )
+
+        if i == 0 or i == num_steps - 1:
+            print(f'  HNN Energy: {energy.item():.6f}')
+
+        grad_q, grad_p = torch.autograd.grad(energy, [seq_qpos, seq_mom])
+
+        # Normalize each gradient by its own L2 norm (+ eps for safety)
+        norm_q = grad_q.norm() + 1e-12
+        norm_p = grad_p.norm() + 1e-12
+
+        seq_qpos = (seq_qpos - alpha_q * grad_q / norm_q).detach().requires_grad_(True)
+        seq_mom = (seq_mom - alpha_p * grad_p / norm_p).detach().requires_grad_(True)
+
+    return torch.cat([seq_qpos, seq_mom], dim=-1)
+
 
 def run_langevin_dynamics_hnn(
     x: torch.Tensor,
@@ -690,6 +899,12 @@ def run_langevin_dynamics_hnn(
     step_size: float,
     noise_scale: float,
     optimize_target: str = "both",
+    guidance_energy_mode: str = "one_step",
+    guidance_hamres_smooth_sigma: float = 1.0,
+    guidance_hamres_delta: float = 1.0,
+    guidance_hamres_min_scale_q: float = 1e-3,
+    guidance_hamres_min_scale_p: float = 1e-3,
+    guidance_trust_lambda: float = 0.0,
 ) -> torch.Tensor:
     """
     Refine trajectory using Langevin dynamics with HNN physics energy.
@@ -711,11 +926,28 @@ def run_langevin_dynamics_hnn(
     """
     seq_qpos = x[:, :, :qpos_dim].clone().requires_grad_(True)
     seq_mom = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().requires_grad_(True)
+    q_ref = x[:, :, :qpos_dim].clone().detach()
+    p_ref = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().detach()
 
     half = num_steps // 2
 
     for i in trange(num_steps, desc='Running Langevin Dynamics'):
-        energy = compute_hnn_physics_energy(seq_qpos, seq_mom, seq_torque, hnn, dt)
+        energy = compute_hnn_guidance_energy(
+            seq_qpos,
+            seq_mom,
+            seq_torque,
+            hnn,
+            dt,
+            mode=guidance_energy_mode,
+            hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+            hamres_delta=guidance_hamres_delta,
+            hamres_min_scale_q=guidance_hamres_min_scale_q,
+            hamres_min_scale_p=guidance_hamres_min_scale_p,
+        )
+        if guidance_trust_lambda > 0:
+            energy = energy + guidance_trust_lambda * (
+                ((seq_qpos - q_ref) ** 2).mean() + ((seq_mom - p_ref) ** 2).mean()
+            )
 
         if i == 0 or i == num_steps - 1:
             print(f'HNN Energy: {energy.item():.6f}')
@@ -753,6 +985,12 @@ def run_adam_optimization_hnn(
     lr: float = 1e-3,
     use_forward_diff: bool = False,
     optimize_target: str = "both",
+    guidance_energy_mode: str = "one_step",
+    guidance_hamres_smooth_sigma: float = 1.0,
+    guidance_hamres_delta: float = 1.0,
+    guidance_hamres_min_scale_q: float = 1e-3,
+    guidance_hamres_min_scale_p: float = 1e-3,
+    guidance_trust_lambda: float = 0.0,
 ) -> torch.Tensor:
     """
     Optimize trajectory using Adam with HNN physics consistency energy.
@@ -778,6 +1016,8 @@ def run_adam_optimization_hnn(
     for b in trange(B, desc='Running Adam Optimization (per-sample)'):
         xb = x[b:b+1]          # [1, T, state_dim]
         tb = seq_torque[b:b+1]  # [1, T, torque_dim]
+        q_ref = xb[:, :, :qpos_dim].clone().detach()
+        p_ref = xb[:, :, qpos_dim:qpos_dim + mom_dim].clone().detach()
 
         if optimize_target == 'alternating':
             # Phase 1: optimize q only
@@ -787,8 +1027,17 @@ def run_adam_optimization_hnn(
             half = num_steps // 2
             for i in range(half):
                 opt_q.zero_grad()
-                energy = compute_hnn_physics_energy(
-                    qb, pb, tb, hnn, dt, use_forward_diff=use_forward_diff)
+                energy = compute_hnn_guidance_energy(
+                    qb, pb, tb, hnn, dt,
+                    mode=guidance_energy_mode,
+                    use_forward_diff=use_forward_diff,
+                    hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+                    hamres_delta=guidance_hamres_delta,
+                    hamres_min_scale_q=guidance_hamres_min_scale_q,
+                    hamres_min_scale_p=guidance_hamres_min_scale_p,
+                )
+                if guidance_trust_lambda > 0:
+                    energy = energy + guidance_trust_lambda * ((qb - q_ref) ** 2).mean()
                 if b == 0 and (i == 0 or i == half - 1):
                     print(f'  sample 0 Phase1(q) Energy: {energy.item():.6f}')
                 energy.backward()
@@ -799,8 +1048,17 @@ def run_adam_optimization_hnn(
             opt_p = torch.optim.Adam([pb], lr=lr)
             for i in range(num_steps - half):
                 opt_p.zero_grad()
-                energy = compute_hnn_physics_energy(
-                    qb_frozen, pb, tb, hnn, dt, use_forward_diff=use_forward_diff)
+                energy = compute_hnn_guidance_energy(
+                    qb_frozen, pb, tb, hnn, dt,
+                    mode=guidance_energy_mode,
+                    use_forward_diff=use_forward_diff,
+                    hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+                    hamres_delta=guidance_hamres_delta,
+                    hamres_min_scale_q=guidance_hamres_min_scale_q,
+                    hamres_min_scale_p=guidance_hamres_min_scale_p,
+                )
+                if guidance_trust_lambda > 0:
+                    energy = energy + guidance_trust_lambda * ((pb - p_ref) ** 2).mean()
                 if b == 0 and (i == 0 or i == num_steps - half - 1):
                     print(f'  sample 0 Phase2(p) Energy: {energy.item():.6f}')
                 energy.backward()
@@ -823,10 +1081,19 @@ def run_adam_optimization_hnn(
             optimizer = torch.optim.Adam(params, lr=lr)
             for i in range(num_steps):
                 optimizer.zero_grad()
-                energy = compute_hnn_physics_energy(
+                energy = compute_hnn_guidance_energy(
                     qb, pb, tb, hnn, dt,
+                    mode=guidance_energy_mode,
                     use_forward_diff=use_forward_diff,
+                    hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+                    hamres_delta=guidance_hamres_delta,
+                    hamres_min_scale_q=guidance_hamres_min_scale_q,
+                    hamres_min_scale_p=guidance_hamres_min_scale_p,
                 )
+                if guidance_trust_lambda > 0:
+                    energy = energy + guidance_trust_lambda * (
+                        ((qb - q_ref) ** 2).mean() + ((pb - p_ref) ** 2).mean()
+                    )
                 if b == 0 and (i == 0 or i == num_steps - 1):
                     print(f'  sample 0 HNN Energy: {energy.item():.6f}')
                 energy.backward()

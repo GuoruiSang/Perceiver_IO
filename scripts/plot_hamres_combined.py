@@ -1,9 +1,4 @@
-"""
-Combine 2DoF and 3DoF HamRes plots.
-1 row x 2 cols: mean lines + fill_between std bands.
-Both systems use σ=5 smoothed data from metrics CSVs.
-Linear scale.
-"""
+"""Plot combined 2DoF/3DoF HamRes from default full sweep (linear scale)."""
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,61 +31,38 @@ TORQUE_STYLES = {
 policies = ['sinusoidal', 'gp', 'zero', 'spline']
 FILL_ALPHA = 0.12
 
-# Load data for both systems from unified metrics CSVs (σ=5 smoothed)
-data_2dof = {}
-results_dir_2dof = project_root / 'output_ablation' / 'results' / '2dof_smoothed'
-for pol in policies:
-    path = results_dir_2dof / f'metrics_{pol}_sigma5.0.csv'
-    if path.exists():
-        df = pd.read_csv(path)
-        df.rename(columns={
-            'unguided_hamres_mean': 'unguided_mean', 'unguided_hamres_std': 'unguided_std',
-            'guided_hamres_mean': 'guided_mean', 'guided_hamres_std': 'guided_std',
-        }, inplace=True)
-        data_2dof[pol] = df
-        print(f"Loaded 2DoF {pol}: {len(df)} rows")
-
-data_3dof_hamres = {}
-results_dir_3dof = project_root / 'output_ablation' / 'results' / '3dof_smoothed'
-for pol in policies:
-    path = results_dir_3dof / f'metrics_{pol}_sigma5.0.csv'
-    if path.exists():
-        df = pd.read_csv(path)
-        df.rename(columns={
-            'unguided_hamres_mean': 'unguided_mean', 'unguided_hamres_std': 'unguided_std',
-            'guided_hamres_mean': 'guided_mean', 'guided_hamres_std': 'guided_std',
-        }, inplace=True)
-        data_3dof_hamres[pol] = df
-        print(f"Loaded 3DoF HamRes {pol}: {len(df)} rows")
+metrics_path = project_root / 'output_ablation' / 'default_full_sweep' / 'metrics' / 'metrics_summary.csv'
+df_all = pd.read_csv(metrics_path)
+print(f'Loaded metrics: {metrics_path} ({len(df_all)} rows)')
 
 
-def make_plot(out_path):
+def make_plot_mean_std(out_path):
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    MAX_LENGTH = 1100
+    MAX_LENGTH = 1000
 
-    # ── Left: 2DoF (mean + std bands) ──
+    # ── Left: 2DoF (mean ± std bands) ──
     ax = axes[0]
     for pol in policies:
-        if pol not in data_2dof:
+        df = df_all[(df_all['system'] == '2dof') & (df_all['policy'] == pol)].copy()
+        if df.empty:
             continue
-        df = data_2dof[pol]
-        df = df[df['trajectory_length'] <= MAX_LENGTH]
+        df = df[df['length'] <= MAX_LENGTH].sort_values('length')
         style = TORQUE_STYLES[pol]
-        L = df['trajectory_length'].values
+        L = df['length'].values
 
-        mean_u = df['unguided_mean'].values
-        std_u = df['unguided_std'].values
+        mean_u = df['ung_hamres_mean'].values
+        std_u = df['ung_hamres_std'].values
         ax.plot(L, mean_u, marker='o', linestyle='--', color=style['ung_color'],
                 alpha=0.8, label=f'{style["label"]} (Unguided)', markersize=2, linewidth=1.5)
         fill_u = ax.fill_between(L, np.maximum(mean_u - std_u, 0), mean_u + std_u,
-                        color=style['ung_color'], alpha=FILL_ALPHA,
-                        edgecolor=style['ung_color'], linewidth=1.8)
+                                 color=style['ung_color'], alpha=FILL_ALPHA,
+                                 edgecolor=style['ung_color'], linewidth=1.8)
         fill_u.set_linestyle('--')
         fill_u.set_edgecolor(style['guid_color'])
 
-        mean_g = df['guided_mean'].values
-        std_g = df['guided_std'].values
+        mean_g = df['gui_hamres_mean'].values
+        std_g = df['gui_hamres_std'].values
         ax.plot(L, mean_g, marker='s', linestyle='-', color=style['guid_color'],
                 label=f'{style["label"]} (Guided)', markersize=3, linewidth=2)
         ax.fill_between(L, np.maximum(mean_g - std_g, 0), mean_g + std_g,
@@ -100,18 +72,18 @@ def make_plot(out_path):
     ax.set_ylabel('HamRes')
     ax.set_title('2DoF')
 
-    # ── Right: 3DoF (mean + std bands) ──
+    # ── Right: 3DoF (mean ± std bands) ──
     ax = axes[1]
     for pol in policies:
-        if pol not in data_3dof_hamres:
+        df = df_all[(df_all['system'] == '3dof') & (df_all['policy'] == pol)].copy()
+        if df.empty:
             continue
-        df = data_3dof_hamres[pol]
-        df = df[df['trajectory_length'] <= MAX_LENGTH]
+        df = df[df['length'] <= MAX_LENGTH].sort_values('length')
         style = TORQUE_STYLES[pol]
-        L = df['trajectory_length'].values
+        L = df['length'].values
 
-        mean_u = df['unguided_mean'].values
-        std_u = df['unguided_std'].values if 'unguided_std' in df.columns else np.zeros_like(mean_u)
+        mean_u = df['ung_hamres_mean'].values
+        std_u = df['ung_hamres_std'].values
         ax.plot(L, mean_u, marker='o', linestyle='--', color=style['ung_color'],
                 alpha=0.8, label=f'{style["label"]} (Unguided)', markersize=2, linewidth=1.5)
         fill_u = ax.fill_between(L, np.maximum(mean_u - std_u, 0), mean_u + std_u,
@@ -120,8 +92,8 @@ def make_plot(out_path):
         fill_u.set_linestyle('--')
         fill_u.set_edgecolor(style['guid_color'])
 
-        mean_g = df['guided_mean'].values
-        std_g = df['guided_std'].values if 'guided_std' in df.columns else np.zeros_like(mean_g)
+        mean_g = df['gui_hamres_mean'].values
+        std_g = df['gui_hamres_std'].values
         ax.plot(L, mean_g, marker='s', linestyle='-', color=style['guid_color'],
                 label=f'{style["label"]} (Guided)', markersize=3, linewidth=2)
         ax.fill_between(L, np.maximum(mean_g - std_g, 0), mean_g + std_g,
@@ -133,7 +105,97 @@ def make_plot(out_path):
 
     # Legend
     handles, labels = axes[0].get_legend_handles_labels()
-    n = len([p for p in policies if p in data_2dof])
+    n = len(policies)
+    if len(handles) >= 2 * n:
+        new_handles, new_labels = [], []
+        for i in range(n):
+            new_handles.append(handles[2 * i])
+            new_handles.append(handles[2 * i + 1])
+            new_labels.append(labels[2 * i])
+            new_labels.append(labels[2 * i + 1])
+        handles, labels = new_handles, new_labels
+    fig.legend(handles, labels, loc='upper center', ncol=4, fontsize=12,
+               framealpha=0.9, bbox_to_anchor=(0.5, 1.05))
+
+    plt.tight_layout(rect=[0, 0, 1, 0.90])
+    fig.savefig(out_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    plt.close(fig)
+    print(f'Saved: {out_path}')
+
+
+def make_plot_median_iqr(out_path):
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    MAX_LENGTH = 1000
+
+    # ── Left: 2DoF (median ± IQR bands) ──
+    ax = axes[0]
+    for pol in policies:
+        df = df_all[(df_all['system'] == '2dof') & (df_all['policy'] == pol)].copy()
+        if df.empty:
+            continue
+        df = df[df['length'] <= MAX_LENGTH].sort_values('length')
+        style = TORQUE_STYLES[pol]
+        L = df['length'].values
+
+        med_u = df['ung_hamres_median'].values
+        q1_u = df['ung_hamres_p25'].values
+        q3_u = df['ung_hamres_p75'].values
+        ax.plot(L, med_u, marker='o', linestyle='--', color=style['ung_color'],
+                alpha=0.8, label=f'{style["label"]} (Unguided)', markersize=2, linewidth=1.5)
+        fill_u = ax.fill_between(L, np.maximum(q1_u, 0), q3_u,
+                                 color=style['ung_color'], alpha=FILL_ALPHA,
+                                 edgecolor=style['ung_color'], linewidth=1.8)
+        fill_u.set_linestyle('--')
+        fill_u.set_edgecolor(style['guid_color'])
+
+        med_g = df['gui_hamres_median'].values
+        q1_g = df['gui_hamres_p25'].values
+        q3_g = df['gui_hamres_p75'].values
+        ax.plot(L, med_g, marker='s', linestyle='-', color=style['guid_color'],
+                label=f'{style["label"]} (Guided)', markersize=3, linewidth=2)
+        ax.fill_between(L, np.maximum(q1_g, 0), q3_g,
+                        color=style['guid_color'], alpha=FILL_ALPHA,
+                        edgecolor=style['guid_color'], linewidth=1.5)
+    ax.set_xlabel('Trajectory Length')
+    ax.set_ylabel('HamRes')
+    ax.set_title('2DoF')
+
+    # ── Right: 3DoF (median ± IQR bands) ──
+    ax = axes[1]
+    for pol in policies:
+        df = df_all[(df_all['system'] == '3dof') & (df_all['policy'] == pol)].copy()
+        if df.empty:
+            continue
+        df = df[df['length'] <= MAX_LENGTH].sort_values('length')
+        style = TORQUE_STYLES[pol]
+        L = df['length'].values
+
+        med_u = df['ung_hamres_median'].values
+        q1_u = df['ung_hamres_p25'].values
+        q3_u = df['ung_hamres_p75'].values
+        ax.plot(L, med_u, marker='o', linestyle='--', color=style['ung_color'],
+                alpha=0.8, label=f'{style["label"]} (Unguided)', markersize=2, linewidth=1.5)
+        fill_u = ax.fill_between(L, np.maximum(q1_u, 0), q3_u,
+                                 color=style['ung_color'], alpha=FILL_ALPHA,
+                                 edgecolor=style['ung_color'], linewidth=1.8)
+        fill_u.set_linestyle('--')
+        fill_u.set_edgecolor(style['guid_color'])
+
+        med_g = df['gui_hamres_median'].values
+        q1_g = df['gui_hamres_p25'].values
+        q3_g = df['gui_hamres_p75'].values
+        ax.plot(L, med_g, marker='s', linestyle='-', color=style['guid_color'],
+                label=f'{style["label"]} (Guided)', markersize=3, linewidth=2)
+        ax.fill_between(L, np.maximum(q1_g, 0), q3_g,
+                        color=style['guid_color'], alpha=FILL_ALPHA,
+                        edgecolor=style['guid_color'], linewidth=1.5)
+    ax.set_xlabel('Trajectory Length')
+    ax.set_ylabel('HamRes')
+    ax.set_title('3DoF')
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    n = len(policies)
     if len(handles) >= 2 * n:
         new_handles, new_labels = [], []
         for i in range(n):
@@ -152,4 +214,5 @@ def make_plot(out_path):
 
 
 plots_dir = project_root / 'plots'
-make_plot(out_path=plots_dir / 'ablation_hamres_combined.png')
+make_plot_mean_std(out_path=plots_dir / 'ablation_hamres_combined_linear.png')
+make_plot_median_iqr(out_path=plots_dir / 'ablation_hamres_combined_linear_median_iqr.png')

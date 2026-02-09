@@ -22,6 +22,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 import h5py
 import mujoco
 from tqdm import tqdm
@@ -36,6 +37,12 @@ DT = 0.0002       # Data timestep (both 2DoF and 3DoF)
 SIM_DT = 0.0001   # MuJoCo simulation timestep
 BATCH_SIZE_UNGUIDED = 200
 BATCH_SIZE_GUIDED = 50
+
+# Robust HamRes settings (stabilized against derivative spikes)
+HAMRES_SMOOTH_SIGMA = 1.0
+HAMRES_PSEUDO_HUBER_DELTA = 1.0
+HAMRES_MIN_SCALE_Q = 1e-3
+HAMRES_MIN_SCALE_P = 1e-3
 
 # Shared torque files (3DoF native; 2DoF slices first 2 dims)
 TORQUE_PATHS = {
@@ -58,7 +65,7 @@ SYSTEM_CONFIGS = {
     },
     '3dof': {
         'dpf_ckpt': project_root / 'checkpoints' / 'trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions:epoch=2999_val_loss:val_loss=0.0010.ckpt',
-        'hnn_ckpt': project_root / 'checkpoints' / 'StructuredHNN-dim256-epoch-epoch=749.ckpt',
+        'hnn_ckpt': project_root / 'checkpoints' / 'StructuredHNN-dim256-epoch-epoch=999.ckpt',
         'xml_path': str(project_root / 'configs' / 'rigid_arm_hinge.xml'),
         'qpos_dim': 3,
         'torque_dim': 3,
@@ -79,25 +86,85 @@ def load_torques(policy, num_samples, max_length, device, cfg):
     return torch.tensor(torques, dtype=torch.float32, device=device)
 
 
-def compute_hamres(qpos, mom, torque, hnn, var_dq, var_dp, dt=DT):
+def _gaussian_smooth_1d(seq: torch.Tensor, sigma: float) -> torch.Tensor:
+    """Apply depthwise Gaussian smoothing over time for [T, D] sequences."""
+    if sigma <= 0:
+        return seq
+    radius = max(1, int(round(3.0 * sigma)))
+    x = torch.arange(-radius, radius + 1, device=seq.device, dtype=seq.dtype)
+    kernel = torch.exp(-0.5 * (x / sigma) ** 2)
+    kernel = kernel / kernel.sum()
+
+    # [T, D] -> [1, D, T] for grouped conv
+    seq_nct = seq.transpose(0, 1).unsqueeze(0)
+    seq_pad = F.pad(seq_nct, (radius, radius), mode='reflect')
+    weight = kernel.view(1, 1, -1).repeat(seq.shape[-1], 1, 1)
+    smoothed = F.conv1d(seq_pad, weight, groups=seq.shape[-1])
+    return smoothed.squeeze(0).transpose(0, 1)
+
+
+def _pseudo_huber(x: torch.Tensor, delta: float) -> torch.Tensor:
+    return (delta ** 2) * (torch.sqrt(1.0 + (x / delta) ** 2) - 1.0)
+
+
+def _dim_scale_from_var(var_like, dim: int, device, dtype):
+    """Return per-dim std from optional variance tensor/scalar; None if unavailable."""
+    if var_like is None:
+        return None
+    var_t = torch.as_tensor(var_like, device=device, dtype=dtype).flatten()
+    if var_t.numel() == 1:
+        return torch.sqrt(torch.clamp(var_t.repeat(dim), min=0.0))
+    if var_t.numel() >= dim:
+        return torch.sqrt(torch.clamp(var_t[:dim], min=0.0))
+    return None
+
+
+def compute_hamres(
+    qpos, mom, torque, hnn, var_dq, var_dp, dt=DT,
+    smooth_sigma=HAMRES_SMOOTH_SIGMA,
+    delta=HAMRES_PSEUDO_HUBER_DELTA,
+    min_scale_q=HAMRES_MIN_SCALE_Q,
+    min_scale_p=HAMRES_MIN_SCALE_P,
+):
     T = qpos.shape[0]
     if T < 3:
         return float('nan')
-    eps = 1e-8
-    qdot = (qpos[2:] - qpos[:-2]) / (2 * dt)
-    pdot = (mom[2:] - mom[:-2]) / (2 * dt)
-    q_mid, p_mid, tau_mid = qpos[1:-1], mom[1:-1], torque[1:-1]
+
+    # Smooth before differentiation to reduce finite-difference noise amplification.
+    q_use = _gaussian_smooth_1d(qpos, smooth_sigma)
+    p_use = _gaussian_smooth_1d(mom, smooth_sigma)
+
+    qdot = (q_use[2:] - q_use[:-2]) / (2 * dt)
+    pdot = (p_use[2:] - p_use[:-2]) / (2 * dt)
+    q_mid, p_mid, tau_mid = q_use[1:-1], p_use[1:-1], torque[1:-1]
     with torch.inference_mode(False):
         with torch.enable_grad():
             p_grad = p_mid.detach().clone().requires_grad_(True)
             q_grad = q_mid.detach().clone().requires_grad_(True)
             H = hnn(p_grad, q_grad)
             dH_dp, dH_dq = torch.autograd.grad(H.sum(), (p_grad, q_grad), create_graph=False)
+
     r_q = qdot - dH_dp
     r_p = pdot - (-dH_dq + tau_mid)
-    mse_q = (r_q ** 2).mean()
-    mse_p = (r_p ** 2).mean()
-    return (mse_q / (var_dq + eps) + mse_p / (var_dp + eps)).item()
+
+    # Per-dimension scales: prefer HNN training stats when dimensionally available.
+    # Fall back to trajectory derivative scales for robustness.
+    q_dim, p_dim = r_q.shape[-1], r_p.shape[-1]
+    scale_q = _dim_scale_from_var(var_dq, q_dim, r_q.device, r_q.dtype)
+    scale_p = _dim_scale_from_var(var_dp, p_dim, r_p.device, r_p.dtype)
+    if scale_q is None:
+        scale_q = torch.sqrt(torch.clamp(qdot.var(dim=0, unbiased=False), min=0.0))
+    if scale_p is None:
+        scale_p = torch.sqrt(torch.clamp(pdot.var(dim=0, unbiased=False), min=0.0))
+    scale_q = torch.clamp(scale_q, min=min_scale_q)
+    scale_p = torch.clamp(scale_p, min=min_scale_p)
+
+    r_q_norm = r_q / scale_q.unsqueeze(0)
+    r_p_norm = r_p / scale_p.unsqueeze(0)
+
+    # Robust per-timestep penalty then median aggregation over time.
+    per_t = _pseudo_huber(r_q_norm, delta).mean(dim=-1) + _pseudo_huber(r_p_norm, delta).mean(dim=-1)
+    return per_t.median().item()
 
 
 def compute_nmse(state, torque, mj_model, qpos_dim, dt=DT, sim_dt=SIM_DT):
@@ -168,12 +235,26 @@ def generate_batch(dpf, num_samples, L, batch_torques, batch_size, guidance_kwar
     return torch.cat(all_states, dim=0), torch.cat(all_torques, dim=0)
 
 
-def compute_metrics_for_samples(states, torques_out, num_samples, mj_model, hnn, var_dq, var_dp, qpos_dim, desc=""):
+def compute_metrics_for_samples(
+    states,
+    torques_out,
+    num_samples,
+    mj_model,
+    hnn,
+    var_dq,
+    var_dp,
+    qpos_dim,
+    desc="",
+    hamres_kwargs=None,
+):
     """Compute per-sample NMSE and HamRes, return raw lists.
 
     Returns: nmse_q_list, nmse_p_list, hamres_list, nmse_q_per_dim_list, nmse_p_per_dim_list
         where *_per_dim_list[i] is a 1D array of shape (num_dims,).
     """
+    if hamres_kwargs is None:
+        hamres_kwargs = {}
+
     nmse_q_list, nmse_p_list, hamres_list = [], [], []
     nmse_q_per_dim_list, nmse_p_per_dim_list = [], []
     for i in tqdm(range(num_samples), desc=desc):
@@ -182,7 +263,7 @@ def compute_metrics_for_samples(states, torques_out, num_samples, mj_model, hnn,
         nmse_q, nmse_p, nmse_q_pd, nmse_p_pd = compute_nmse(state, tau, mj_model, qpos_dim)
         qpos = state[:, :qpos_dim]
         mom = state[:, qpos_dim:]
-        hr = compute_hamres(qpos, mom, tau, hnn, var_dq, var_dp)
+        hr = compute_hamres(qpos, mom, tau, hnn, var_dq, var_dp, **hamres_kwargs)
         nmse_q_list.append(nmse_q)
         nmse_p_list.append(nmse_p)
         nmse_q_per_dim_list.append(nmse_q_pd)

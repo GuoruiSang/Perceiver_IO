@@ -827,6 +827,12 @@ class TrajectoryDPF(pl.LightningModule):
         langevin_noise_scale: float = 1e-6,
         chunk_length: int = 15,  # Chunk length for integration-based guidance
         use_forward_diff: bool = False,  # Use forward difference instead of central difference for HamRes
+        guidance_energy_mode: str = "one_step",  # 'one_step' or 'robust_hamres'
+        guidance_hamres_smooth_sigma: float = 1.0,
+        guidance_hamres_delta: float = 1.0,
+        guidance_hamres_min_scale_q: float = 1e-3,
+        guidance_hamres_min_scale_p: float = 1e-3,
+        guidance_trust_lambda: float = 0.0,
         dt: Optional[float] = None,
         # Torque generation parameters
         torque: torch.Tensor = None,  # Optional: provide torque directly
@@ -836,6 +842,8 @@ class TrajectoryDPF(pl.LightningModule):
         smooth_guidance_only: bool = False,  # If True, smooth only for guidance input; output stays unsmoothed
         smooth_last_step_only: bool = False,  # If True, only smooth at the final diffusion step
         optimize_target: str = "both",  # 'both', 'q' (position only), or 'p' (momentum only)
+        alpha_q: float = 1e-4,  # Normalized SGD step size for q
+        alpha_p: float = 1e-4,  # Normalized SGD step size for p
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample trajectories using diffusion with classifier-free guidance.
@@ -872,7 +880,7 @@ class TrajectoryDPF(pl.LightningModule):
                 - state: [num_samples, trajectory_length, state_dim] (qpos, mom)
                 - torque: [num_samples, trajectory_length, torque_dim]
         """
-        from src.models.utils import run_adam_optimization_hnn, run_langevin_dynamics_hnn, run_adam_optimization_hnn_integration
+        from src.models.utils import run_adam_optimization_hnn, run_langevin_dynamics_hnn, run_adam_optimization_hnn_integration, run_normalized_sgd_hnn
         
         self.model.eval()
         
@@ -1030,18 +1038,42 @@ class TrajectoryDPF(pl.LightningModule):
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             use_forward_diff=use_forward_diff,
                             optimize_target=optimize_target,
+                            guidance_energy_mode=guidance_energy_mode,
+                            guidance_hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+                            guidance_hamres_delta=guidance_hamres_delta,
+                            guidance_hamres_min_scale_q=guidance_hamres_min_scale_q,
+                            guidance_hamres_min_scale_p=guidance_hamres_min_scale_p,
+                            guidance_trust_lambda=guidance_trust_lambda,
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
                             x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale,
                             optimize_target=optimize_target,
+                            guidance_energy_mode=guidance_energy_mode,
+                            guidance_hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+                            guidance_hamres_delta=guidance_hamres_delta,
+                            guidance_hamres_min_scale_q=guidance_hamres_min_scale_q,
+                            guidance_hamres_min_scale_p=guidance_hamres_min_scale_p,
+                            guidance_trust_lambda=guidance_trust_lambda,
                         )
                     elif guidance_method == "adam_integration":
                         x0_phys = run_adam_optimization_hnn_integration(
                             x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             chunk_length=chunk_length
+                        )
+                    elif guidance_method == "normalized_sgd":
+                        x0_phys = run_normalized_sgd_hnn(
+                            x0_gui, torque, self.qpos_dim, self.mom_dim,
+                            self.data_dt, hnn, guidance_steps,
+                            alpha_q=alpha_q, alpha_p=alpha_p,
+                            guidance_energy_mode=guidance_energy_mode,
+                            guidance_hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+                            guidance_hamres_delta=guidance_hamres_delta,
+                            guidance_hamres_min_scale_q=guidance_hamres_min_scale_q,
+                            guidance_hamres_min_scale_p=guidance_hamres_min_scale_p,
+                            guidance_trust_lambda=guidance_trust_lambda,
                         )
                     # Smooth after guidance (per-step mode only)
                     if do_output_smooth:
@@ -1079,18 +1111,42 @@ class TrajectoryDPF(pl.LightningModule):
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             use_forward_diff=use_forward_diff,
                             optimize_target=optimize_target,
+                            guidance_energy_mode=guidance_energy_mode,
+                            guidance_hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+                            guidance_hamres_delta=guidance_hamres_delta,
+                            guidance_hamres_min_scale_q=guidance_hamres_min_scale_q,
+                            guidance_hamres_min_scale_p=guidance_hamres_min_scale_p,
+                            guidance_trust_lambda=guidance_trust_lambda,
                         )
                     elif guidance_method == "langevin":
                         x0_phys = run_langevin_dynamics_hnn(
                             x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, langevin_step_size, langevin_noise_scale,
                             optimize_target=optimize_target,
+                            guidance_energy_mode=guidance_energy_mode,
+                            guidance_hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+                            guidance_hamres_delta=guidance_hamres_delta,
+                            guidance_hamres_min_scale_q=guidance_hamres_min_scale_q,
+                            guidance_hamres_min_scale_p=guidance_hamres_min_scale_p,
+                            guidance_trust_lambda=guidance_trust_lambda,
                         )
                     elif guidance_method == "adam_integration":
                         x0_phys = run_adam_optimization_hnn_integration(
                             x0_gui, torque, self.qpos_dim, self.mom_dim,
                             self.data_dt, hnn, guidance_steps, guidance_lr,
                             chunk_length=chunk_length
+                        )
+                    elif guidance_method == "normalized_sgd":
+                        x0_phys = run_normalized_sgd_hnn(
+                            x0_gui, torque, self.qpos_dim, self.mom_dim,
+                            self.data_dt, hnn, guidance_steps,
+                            alpha_q=alpha_q, alpha_p=alpha_p,
+                            guidance_energy_mode=guidance_energy_mode,
+                            guidance_hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+                            guidance_hamres_delta=guidance_hamres_delta,
+                            guidance_hamres_min_scale_q=guidance_hamres_min_scale_q,
+                            guidance_hamres_min_scale_p=guidance_hamres_min_scale_p,
+                            guidance_trust_lambda=guidance_trust_lambda,
                         )
                     # Smooth after guidance (per-step mode only)
                     if do_output_smooth:
@@ -1796,4 +1852,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

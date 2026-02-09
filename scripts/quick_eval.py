@@ -25,6 +25,8 @@ from src.models.utils import EMA, reconstruct_traj_with_momentum
 from compute_ablation_2dof_with_smoothing import (
     SYSTEM_CONFIGS, DT, SIM_DT,
     BATCH_SIZE_UNGUIDED, BATCH_SIZE_GUIDED,
+    HAMRES_SMOOTH_SIGMA, HAMRES_PSEUDO_HUBER_DELTA,
+    HAMRES_MIN_SCALE_Q, HAMRES_MIN_SCALE_P,
     load_torques, compute_metrics_for_samples,
 )
 
@@ -32,10 +34,10 @@ from compute_ablation_2dof_with_smoothing import (
 # CONFIG — 改这里，然后直接运行脚本
 # ============================================================
 SYSTEM          = '3dof'        # '2dof' or '3dof'
-POLICY          = 'gp'  # 'sinusoidal', 'gp', 'zero', 'spline'
+POLICY          = 'sinusoidal'  # 'sinusoidal', 'gp', 'zero', 'spline'
 LENGTH          = 1000           # 轨迹长度
-NUM_SAMPLES     = 16            # 样本数 (小值快速迭代)
-SEED            = 65            # 随机种子
+NUM_SAMPLES     = 4            # 样本数 (小值快速迭代)
+SEED            = 10           # 随机种子
 DEVICE          = 'cuda:4'      # GPU 设备
 
 # 平滑
@@ -44,22 +46,90 @@ SMOOTH_GUIDANCE_ONLY  = False       # True=只在guidance能量计算时平滑�
 SMOOTH_LAST_STEP_ONLY = False       # True=只在最后一步扩散时平滑
 
 # Guidance (None = 用 SYSTEM_CONFIGS 里的系统默认值)
-GUIDANCE_METHOD    = 'adam'        # 'adam', 'langevin', 'adam_integration'
-OPTIMIZE_TARGET    = 'both'       # 'both', 'q' (只优化位置), 'p' (只优化动量)
-GUIDANCE_STEPS  = 100          # 优化步数/每个 guidance-active 扩散步
-GUIDANCE_LR     = 0.01          # Adam 学习率 (adam/adam_integration 用)
-GUIDANCE_AFTER  = 15          # 第 N 步扩散后开始 guidance
-GUIDANCE_BEFORE = 20         # 第 N 步扩散前停止 guidance
+GUIDANCE_PRESET = 'one_step_best'
+# 预设:
+#   one_step_best     -> one-step guidance 最佳配置（same-budget search, 3DoF）
+#   robust_r3_sigma05 -> robust_hamres 推荐配置
+#   robust_r9_comboA  -> robust_hamres 更激进配置
+#   auto              -> 按系统自动选择（2dof: robust_r9_comboA, 3dof: one_step_best）
+#   custom            -> 使用下方自定义参数
+GUIDANCE_METHOD    = 'normalized_sgd'  # 仅 custom 使用
+OPTIMIZE_TARGET    = 'both'            # 仅 custom 使用
+GUIDANCE_ENERGY_MODE = 'one_step'      # 仅 custom 使用
+GUIDANCE_STEPS  = 100                  # 仅 custom 使用
+GUIDANCE_LR     = 0.01                 # 仅 custom 使用
+GUIDANCE_AFTER  = 15                   # 仅 custom 使用
+GUIDANCE_BEFORE = 20                   # 仅 custom 使用
+# Trust region (防止 guidance 偏离 DPF 先验过远)
+GUIDANCE_TRUST_LAMBDA = 0.0            # 仅 custom 使用
+# robust_hamres guidance 能量参数
+GUIDANCE_HAMRES_SMOOTH_SIGMA = 1.0     # 仅 custom 使用
+GUIDANCE_HAMRES_DELTA = 1.0            # 仅 custom 使用
+GUIDANCE_HAMRES_MIN_SCALE_Q = 1e-3     # 仅 custom 使用
+GUIDANCE_HAMRES_MIN_SCALE_P = 1e-3     # 仅 custom 使用
 # Langevin 专用
 LANGEVIN_STEP_SIZE   = 1e-6    # Langevin 步长
 LANGEVIN_NOISE_SCALE = 1e-5    # Langevin 噪声尺度
+# normalized_sgd 专用
+ALPHA_Q         = 1e-2          # q 步长 (normalized SGD)
+ALPHA_P         = 1e-2          # p 步长 (normalized SGD)
 # adam_integration 专用
 CHUNK_LENGTH    = 15            # 积分 chunk 长度
 
 # 扩散
 NUM_DIFFUSION_STEPS = 20      # DDIM 总步数 (None=模型默认 ~50)
-USE_FORWARD_DIFF    = True     # True=前向差分, False=中心差分
+
+# HamRes（评估）稳定性参数：None=使用 compute_ablation_2dof_with_smoothing.py 默认值
+HAMRES_SMOOTH_SIGMA_CFG = None
+HAMRES_DELTA_CFG        = None
+HAMRES_MIN_SCALE_Q_CFG  = None
+HAMRES_MIN_SCALE_P_CFG  = None
 # ============================================================
+
+GUIDANCE_PRESETS = {
+    'one_step_best': dict(
+        guidance_method='normalized_sgd',
+        optimize_target='both',
+        guidance_energy_mode='one_step',
+        guidance_steps=50,
+        guidance_lr=0.01,
+        guidance_after=10,
+        guidance_before=20,
+        guidance_trust_lambda=1e-3,
+        guidance_hamres_smooth_sigma=1.0,
+        guidance_hamres_delta=1.0,
+        guidance_hamres_min_scale_q=1e-3,
+        guidance_hamres_min_scale_p=1e-3,
+    ),
+    'robust_r3_sigma05': dict(
+        guidance_method='normalized_sgd',
+        optimize_target='both',
+        guidance_energy_mode='robust_hamres',
+        guidance_steps=50,
+        guidance_lr=0.01,
+        guidance_after=15,
+        guidance_before=20,
+        guidance_trust_lambda=0.0,
+        guidance_hamres_smooth_sigma=0.5,
+        guidance_hamres_delta=1.0,
+        guidance_hamres_min_scale_q=1e-3,
+        guidance_hamres_min_scale_p=1e-3,
+    ),
+    'robust_r9_comboa': dict(
+        guidance_method='normalized_sgd',
+        optimize_target='both',
+        guidance_energy_mode='robust_hamres',
+        guidance_steps=50,
+        guidance_lr=0.01,
+        guidance_after=10,
+        guidance_before=20,
+        guidance_trust_lambda=1e-3,
+        guidance_hamres_smooth_sigma=0.5,
+        guidance_hamres_delta=2.0,
+        guidance_hamres_min_scale_q=1e-3,
+        guidance_hamres_min_scale_p=1e-3,
+    ),
+}
 
 
 def set_seed(seed):
@@ -103,7 +173,7 @@ def load_models(cfg, device):
     return dpf, hnn, var_dq, var_dp, mj_model
 
 
-def _reconstruct_gt(qpos, mom, torque, xml_path, qpos_dim):
+def _reconstruct_gt(qpos, mom, torque, xml_path):
     """Run MuJoCo reconstruction for a single sample."""
     model = mujoco.MjModel.from_xml_path(xml_path)
     data = mujoco.MjData(model)
@@ -139,8 +209,8 @@ def plot_trajectories(ung_states, ung_torques, gui_states, gui_torques,
     tau = ung_torques[idx].detach().cpu().numpy() if torch.is_tensor(ung_torques) else ung_torques[idx]
 
     # MuJoCo GT reconstruction (same initial state & torques → same GT for both)
-    ung_recon = _reconstruct_gt(ung_s[:, :qpos_dim], ung_s[:, qpos_dim:], tau, xml_path, qpos_dim)
-    gui_recon = _reconstruct_gt(gui_s[:, :qpos_dim], gui_s[:, qpos_dim:], tau, xml_path, qpos_dim)
+    ung_recon = _reconstruct_gt(ung_s[:, :qpos_dim], ung_s[:, qpos_dim:], tau, xml_path)
+    gui_recon = _reconstruct_gt(gui_s[:, :qpos_dim], gui_s[:, qpos_dim:], tau, xml_path)
 
     fig, axes = plt.subplots(3, ncols, figsize=(5 * ncols, 10))
 
@@ -229,22 +299,68 @@ def run_batch(dpf, torques, noise, L, batch_size, **kwargs):
 def main():
     # Resolve defaults from system config
     cfg = SYSTEM_CONFIGS[SYSTEM]
-    guidance_steps = GUIDANCE_STEPS if GUIDANCE_STEPS is not None else cfg['guidance_steps']
-    guidance_lr = GUIDANCE_LR if GUIDANCE_LR is not None else cfg['guidance_lr']
-    guidance_after = GUIDANCE_AFTER if GUIDANCE_AFTER is not None else cfg['guidance_after_steps']
-    guidance_before = GUIDANCE_BEFORE
+    preset_key = GUIDANCE_PRESET.lower()
+    if preset_key == 'auto':
+        preset_key = 'robust_r9_comboa' if SYSTEM == '2dof' else 'one_step_best'
+    if preset_key == 'custom':
+        guidance_method = GUIDANCE_METHOD
+        optimize_target = OPTIMIZE_TARGET
+        guidance_energy_mode = GUIDANCE_ENERGY_MODE
+        guidance_steps = GUIDANCE_STEPS if GUIDANCE_STEPS is not None else cfg['guidance_steps']
+        guidance_lr = GUIDANCE_LR if GUIDANCE_LR is not None else cfg['guidance_lr']
+        guidance_after = GUIDANCE_AFTER if GUIDANCE_AFTER is not None else cfg['guidance_after_steps']
+        guidance_before = GUIDANCE_BEFORE
+        guidance_trust_lambda = GUIDANCE_TRUST_LAMBDA
+        guidance_hamres_smooth_sigma = GUIDANCE_HAMRES_SMOOTH_SIGMA
+        guidance_hamres_delta = GUIDANCE_HAMRES_DELTA
+        guidance_hamres_min_scale_q = GUIDANCE_HAMRES_MIN_SCALE_Q
+        guidance_hamres_min_scale_p = GUIDANCE_HAMRES_MIN_SCALE_P
+    else:
+        if preset_key not in GUIDANCE_PRESETS:
+            raise ValueError(
+                f"Unknown GUIDANCE_PRESET={GUIDANCE_PRESET!r}. "
+                f"Choose from {list(GUIDANCE_PRESETS.keys()) + ['custom']}"
+            )
+        p = GUIDANCE_PRESETS[preset_key]
+        guidance_method = p['guidance_method']
+        optimize_target = p['optimize_target']
+        guidance_energy_mode = p['guidance_energy_mode']
+        guidance_steps = p['guidance_steps']
+        guidance_lr = p['guidance_lr']
+        guidance_after = p['guidance_after']
+        guidance_before = p['guidance_before']
+        guidance_trust_lambda = p['guidance_trust_lambda']
+        guidance_hamres_smooth_sigma = p['guidance_hamres_smooth_sigma']
+        guidance_hamres_delta = p['guidance_hamres_delta']
+        guidance_hamres_min_scale_q = p['guidance_hamres_min_scale_q']
+        guidance_hamres_min_scale_p = p['guidance_hamres_min_scale_p']
     device = torch.device(DEVICE if torch.cuda.is_available() else 'cpu')
+    hamres_kwargs = dict(
+        smooth_sigma=HAMRES_SMOOTH_SIGMA if HAMRES_SMOOTH_SIGMA_CFG is None else HAMRES_SMOOTH_SIGMA_CFG,
+        delta=HAMRES_PSEUDO_HUBER_DELTA if HAMRES_DELTA_CFG is None else HAMRES_DELTA_CFG,
+        min_scale_q=HAMRES_MIN_SCALE_Q if HAMRES_MIN_SCALE_Q_CFG is None else HAMRES_MIN_SCALE_Q_CFG,
+        min_scale_p=HAMRES_MIN_SCALE_P if HAMRES_MIN_SCALE_P_CFG is None else HAMRES_MIN_SCALE_P_CFG,
+    )
 
     # Print config
     print(f"{'='*64}")
     print(f"Quick Eval: {SYSTEM} | {POLICY} | L={LENGTH} | N={NUM_SAMPLES} | seed={SEED}")
     print(f"{'-'*64}")
-    print(f"Guidance: method={GUIDANCE_METHOD}  target={OPTIMIZE_TARGET}  steps={guidance_steps}  lr={guidance_lr}  after={guidance_after}  before={guidance_before}")
-    if GUIDANCE_METHOD == 'langevin':
+    if GUIDANCE_PRESET.lower() == 'auto':
+        print(f"Guidance preset: auto -> {preset_key}")
+    else:
+        print(f"Guidance preset: {GUIDANCE_PRESET}")
+    print(f"Guidance: method={guidance_method}  energy={guidance_energy_mode}  target={optimize_target}  steps={guidance_steps}  lr={guidance_lr}  after={guidance_after}  before={guidance_before}  trust_lambda={guidance_trust_lambda}")
+    if guidance_method == 'langevin':
         print(f"  Langevin: step_size={LANGEVIN_STEP_SIZE}  noise_scale={LANGEVIN_NOISE_SCALE}")
-    elif GUIDANCE_METHOD == 'adam_integration':
+    elif guidance_method == 'normalized_sgd':
+        print(f"  Normalized SGD: alpha_q={ALPHA_Q}  alpha_p={ALPHA_P}")
+    elif guidance_method == 'adam_integration':
         print(f"  Integration: chunk_length={CHUNK_LENGTH}")
-    print(f"Smoothing: sigma={SMOOTH_SIGMA}  guidance_only={SMOOTH_GUIDANCE_ONLY}  last_step_only={SMOOTH_LAST_STEP_ONLY}  Forward diff: {USE_FORWARD_DIFF}")
+    if guidance_energy_mode == 'robust_hamres':
+        print(f"  robust_hamres: smooth_sigma={guidance_hamres_smooth_sigma}  delta={guidance_hamres_delta}  min_scale_q={guidance_hamres_min_scale_q}  min_scale_p={guidance_hamres_min_scale_p}")
+    print(f"Smoothing: sigma={SMOOTH_SIGMA}  guidance_only={SMOOTH_GUIDANCE_ONLY}  last_step_only={SMOOTH_LAST_STEP_ONLY}")
+    print(f"HamRes eval: smooth_sigma={hamres_kwargs['smooth_sigma']}  delta={hamres_kwargs['delta']}  min_scale_q={hamres_kwargs['min_scale_q']}  min_scale_p={hamres_kwargs['min_scale_p']}")
     if NUM_DIFFUSION_STEPS is not None:
         print(f"Diffusion steps: {NUM_DIFFUSION_STEPS}")
     print(f"{'='*64}")
@@ -267,15 +383,22 @@ def main():
     ung_kwargs = dict(hnn=None, guidance_steps=0, smooth_sigma=SMOOTH_SIGMA,
                       **shared_kwargs)
     gui_kwargs = dict(
-        hnn=hnn, guidance_method=GUIDANCE_METHOD,
+        hnn=hnn, guidance_method=guidance_method,
         guidance_steps=guidance_steps, guidance_lr=guidance_lr,
         guidance_after_steps=guidance_after, guidance_before_steps=guidance_before,
-        optimize_target=OPTIMIZE_TARGET,
+        optimize_target=optimize_target,
+        guidance_energy_mode=guidance_energy_mode,
+        guidance_hamres_smooth_sigma=guidance_hamres_smooth_sigma,
+        guidance_hamres_delta=guidance_hamres_delta,
+        guidance_hamres_min_scale_q=guidance_hamres_min_scale_q,
+        guidance_hamres_min_scale_p=guidance_hamres_min_scale_p,
+        guidance_trust_lambda=guidance_trust_lambda,
         smooth_sigma=SMOOTH_SIGMA, smooth_guidance_only=SMOOTH_GUIDANCE_ONLY,
         smooth_last_step_only=SMOOTH_LAST_STEP_ONLY,
-        use_forward_diff=USE_FORWARD_DIFF,
         langevin_step_size=LANGEVIN_STEP_SIZE,
         langevin_noise_scale=LANGEVIN_NOISE_SCALE,
+        alpha_q=ALPHA_Q,
+        alpha_p=ALPHA_P,
         chunk_length=CHUNK_LENGTH,
         **shared_kwargs,
     )
@@ -299,10 +422,10 @@ def main():
     t0 = time.time()
     ung_nq, ung_np, ung_hr, ung_nq_pd, ung_np_pd = compute_metrics_for_samples(
         ung_states, ung_torques, NUM_SAMPLES, mj_model, hnn,
-        var_dq, var_dp, qpos_dim, desc="unguided")
+        var_dq, var_dp, qpos_dim, desc="unguided", hamres_kwargs=hamres_kwargs)
     gui_nq, gui_np, gui_hr, gui_nq_pd, gui_np_pd = compute_metrics_for_samples(
         gui_states, gui_torques, NUM_SAMPLES, mj_model, hnn,
-        var_dq, var_dp, qpos_dim, desc="guided")
+        var_dq, var_dp, qpos_dim, desc="guided", hamres_kwargs=hamres_kwargs)
     t_met = time.time() - t0
 
     # Per-dim arrays: shape (num_samples, num_dims)

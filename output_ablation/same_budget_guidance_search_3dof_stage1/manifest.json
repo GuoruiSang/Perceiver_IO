@@ -1,0 +1,167 @@
+{
+  "system": "3dof",
+  "policies": [
+    "sinusoidal",
+    "gp",
+    "zero",
+    "spline"
+  ],
+  "lengths": [
+    100,
+    300,
+    700,
+    1000
+  ],
+  "seeds": [
+    10,
+    11
+  ],
+  "num_samples": 12,
+  "num_candidates": 12,
+  "num_diff_steps": 20,
+  "search_seed": 2026,
+  "candidates": [
+    {
+      "id": "mode=robust_hamres|steps=30|after=10|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.0|ham_sigma=1.0|ham_delta=2.0",
+      "mode": "robust_hamres",
+      "steps": 30,
+      "after": 10,
+      "before": 20,
+      "alpha_q": 0.01,
+      "alpha_p": 0.01,
+      "trust": 0.0,
+      "ham_sigma": 1.0,
+      "ham_delta": 2.0
+    },
+    {
+      "id": "mode=one_step|steps=30|after=15|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.0",
+      "mode": "one_step",
+      "steps": 30,
+      "after": 15,
+      "before": 20,
+      "alpha_q": 0.01,
+      "alpha_p": 0.01,
+      "trust": 0.0
+    },
+    {
+      "id": "mode=robust_hamres|steps=30|after=15|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.0|ham_sigma=0.5|ham_delta=2.0",
+      "mode": "robust_hamres",
+      "steps": 30,
+      "after": 15,
+      "before": 20,
+      "alpha_q": 0.01,
+      "alpha_p": 0.01,
+      "trust": 0.0,
+      "ham_sigma": 0.5,
+      "ham_delta": 2.0
+    },
+    {
+      "id": "mode=robust_hamres|steps=50|after=15|before=20|alpha_q=0.005|alpha_p=0.005|trust=0.0|ham_sigma=1.0|ham_delta=1.0",
+      "mode": "robust_hamres",
+      "steps": 50,
+      "after": 15,
+      "before": 20,
+      "alpha_q": 0.005,
+      "alpha_p": 0.005,
+      "trust": 0.0,
+      "ham_sigma": 1.0,
+      "ham_delta": 1.0
+    },
+    {
+      "id": "mode=one_step|steps=30|after=15|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.001",
+      "mode": "one_step",
+      "steps": 30,
+      "after": 15,
+      "before": 20,
+      "alpha_q": 0.01,
+      "alpha_p": 0.01,
+      "trust": 0.001
+    },
+    {
+      "id": "mode=robust_hamres|steps=30|after=15|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.001|ham_sigma=0.5|ham_delta=2.0",
+      "mode": "robust_hamres",
+      "steps": 30,
+      "after": 15,
+      "before": 20,
+      "alpha_q": 0.01,
+      "alpha_p": 0.01,
+      "trust": 0.001,
+      "ham_sigma": 0.5,
+      "ham_delta": 2.0
+    },
+    {
+      "id": "mode=robust_hamres|steps=50|after=15|before=20|alpha_q=0.005|alpha_p=0.005|trust=0.001|ham_sigma=0.5|ham_delta=2.0",
+      "mode": "robust_hamres",
+      "steps": 50,
+      "after": 15,
+      "before": 20,
+      "alpha_q": 0.005,
+      "alpha_p": 0.005,
+      "trust": 0.001,
+      "ham_sigma": 0.5,
+      "ham_delta": 2.0
+    },
+    {
+      "id": "mode=one_step|steps=50|after=10|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.001",
+      "mode": "one_step",
+      "steps": 50,
+      "after": 10,
+      "before": 20,
+      "alpha_q": 0.01,
+      "alpha_p": 0.01,
+      "trust": 0.001
+    },
+    {
+      "id": "mode=robust_hamres|steps=50|after=10|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.0|ham_sigma=1.0|ham_delta=2.0",
+      "mode": "robust_hamres",
+      "steps": 50,
+      "after": 10,
+      "before": 20,
+      "alpha_q": 0.01,
+      "alpha_p": 0.01,
+      "trust": 0.0,
+      "ham_sigma": 1.0,
+      "ham_delta": 2.0
+    },
+    {
+      "id": "mode=robust_hamres|steps=50|after=10|before=20|alpha_q=0.005|alpha_p=0.005|trust=0.0|ham_sigma=0.5|ham_delta=2.0",
+      "mode": "robust_hamres",
+      "steps": 50,
+      "after": 10,
+      "before": 20,
+      "alpha_q": 0.005,
+      "alpha_p": 0.005,
+      "trust": 0.0,
+      "ham_sigma": 0.5,
+      "ham_delta": 2.0
+    },
+    {
+      "id": "mode=robust_hamres|steps=30|after=15|before=20|alpha_q=0.005|alpha_p=0.005|trust=0.001|ham_sigma=0.5|ham_delta=2.0",
+      "mode": "robust_hamres",
+      "steps": 30,
+      "after": 15,
+      "before": 20,
+      "alpha_q": 0.005,
+      "alpha_p": 0.005,
+      "trust": 0.001,
+      "ham_sigma": 0.5,
+      "ham_delta": 2.0
+    },
+    {
+      "id": "mode=robust_hamres|steps=50|after=10|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.001|ham_sigma=0.5|ham_delta=2.0",
+      "mode": "robust_hamres",
+      "steps": 50,
+      "after": 10,
+      "before": 20,
+      "alpha_q": 0.01,
+      "alpha_p": 0.01,
+      "trust": 0.001,
+      "ham_sigma": 0.5,
+      "ham_delta": 2.0
+    }
+  ],
+  "models": {
+    "dpf": "/home/gsang/Projects/Perceiver_IO/checkpoints/trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&VariableTrajLength&UniformContext&EncoderNone&DecoderAttentions:epoch=2999_val_loss:val_loss=0.0010.ckpt",
+    "fixed_diffusion": "/home/gsang/Projects/Perceiver_IO/checkpoints/trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&FixedTrajLength1000&UniformContext&EncoderNone&DecoderAttentions:epoch=2999_val_loss:val_loss=0.0008.ckpt"
+  }
+}
