@@ -9,6 +9,9 @@
 
 Generate NMSE and HamRes metrics for 2DoF and 3DoF systems across 4 torque policies and 30 trajectory lengths (50–1500), using a dual-smoothing strategy during diffusion sampling. Produce combined plots with mean +/- std bands (linear scale).
 
+> Note: This is a historical experiment note. The old plotting scripts referenced below were removed during cleanup.
+> For the active pipeline, use `docs/metrics_memo.md` and Protocol-2 transformer scripts.
+
 ---
 
 ## Smoothing Strategy
@@ -70,8 +73,8 @@ All torque data from 3DoF files (shape [1000, 1500, 3]). 2DoF slices first 2 dim
 |--------|---------|
 | `scripts/compute_ablation_2dof_with_smoothing.py` | Generate trajectories (unguided + guided) and compute NMSE/HamRes metrics |
 | `scripts/compute_hnn_rollout_nmse_unified.py` | Compute HNN forward rollout NMSE baseline |
-| `scripts/plot_hamres_combined.py` | HamRes plot: 1x2 (2DoF, 3DoF), mean +/- std bands, linear scale |
-| `scripts/plot_nmse_combined.py` | NMSE plot: 2x2 (2DoF/3DoF x q/p), mean +/- std bands + HNN rollout, linear scale |
+| *(removed)* `scripts/plot_hamres_combined.py` | Old HamRes combined plot script (deprecated) |
+| *(removed)* `scripts/plot_nmse_combined.py` | Old NMSE combined plot script (deprecated) |
 
 ---
 
@@ -108,8 +111,9 @@ python scripts/compute_hnn_rollout_nmse_unified.py --system 2dof --policy sinuso
 ### Plot generation
 
 ```bash
-python scripts/plot_hamres_combined.py
-python scripts/plot_nmse_combined.py
+# historical scripts removed
+# use current Protocol-2 plotting pipeline:
+bash scripts/run_protocol2_transformer_vs_dpf_hnn.sh
 ```
 
 ---

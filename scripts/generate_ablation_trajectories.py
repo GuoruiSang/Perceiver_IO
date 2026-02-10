@@ -2,7 +2,7 @@
 Ablation Trajectory Generation Pipeline - Single Model Runner
 
 Generates trajectories for all experimental conditions and saves them to H5.
-No MSE computation (deferred to compute_ablation_mse.py for speed).
+Metric computation is handled by downstream evaluation/report scripts.
 
 Experiments:
   A) Variable trajectory lengths: 4 torque conditions x 30 lengths x 2 modes (unguided/guided)

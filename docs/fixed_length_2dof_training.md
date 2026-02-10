@@ -1,5 +1,9 @@
 # Fixed-Length 2DoF Model Training
 
+> Note (current status): this page documents the original fixed-length training flow.
+> The current standard-diffusion baseline for comparison is now `--backbone transformer`.
+> See `docs/transformer_baseline_architecture.md` for the exact architecture and tokenization.
+
 ## Objective
 
 Train a fixed-length (non-variable-length) diffusion model for the 2DoF hinge arm using the same `TrajectoryDPF` architecture used in 3DoF.

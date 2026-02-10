@@ -1,4 +1,6 @@
-# Metrics Computation Memo: HamRes and NMSE
+# Metrics Computation Memo: Robust HamRes and NRMSE(range)
+
+Last updated: 2026-02-10
 
 ## 1. HamRes (Hamiltonian Residual)
 
@@ -18,10 +20,10 @@ HamRes_t = mean_d( rho(r_q_norm[d]) + rho(r_p_norm[d]) )
 HamRes = median_t( HamRes_t )
 ```
 
-- `dq/dt`, `dp/dt`: central difference from smoothed trajectory (`sigma=1.0` Gaussian by default)
+- `dq/dt`, `dp/dt`: central difference from smoothed trajectory (`sigma=1.0` by default)
 - `dH/dp`, `dH/dq`: autograd from pre-trained HNN
 - `τ`: external torque
-- `scale_q`, `scale_p`: per-dimension normalization scales (prefer HNN training stats if per-dim; otherwise derivative std from current trajectory)
+- `scale_q`, `scale_p`: per-dimension normalization scales
 - `eps_q`, `eps_p`: denominator floors (`1e-3` default)
 - `delta`: pseudo-Huber transition parameter (`1.0` default)
 
@@ -29,144 +31,132 @@ HamRes = median_t( HamRes_t )
 
 - Finite differences amplify small high-frequency noise in `q` and `p`.
 - Position and momentum channels often have different scales.
-- Squared-loss + mean aggregation can be dominated by a small number of spikes.
+- Squared loss + mean aggregation can be dominated by a few spike timesteps.
 
-The robust version (smoothing + per-dim normalization + pseudo-Huber + median over time) is much more stable for trajectory comparison.
+The robust version (smoothing + per-dim normalization + pseudo-Huber + median-over-time) is much more stable for trajectory comparison.
 
 ---
 
-## 2. NMSE (Normalized Mean Squared Error)
+## 2. NRMSE(range)
 
 ### Definition
-NMSE measures trajectory accuracy relative to MuJoCo physics reconstruction, computed **per-dimension** then averaged:
+NRMSE(range) measures trajectory error relative to MuJoCo reconstruction, computed per dimension then averaged:
 
 ```
-NMSE_q = mean_d( MSE_t(q_gen[:,d], q_recon[:,d]) / Var_t(q_recon[:,d]) )
-NMSE_p = mean_d( MSE_t(p_gen[:,d], p_recon[:,d]) / Var_t(p_recon[:,d]) )
+NRMSE_q = mean_d( RMSE_t(q_gen[:,d], q_recon[:,d]) / (range_t(q_recon[:,d]) + eps_q) )
+NRMSE_p = mean_d( RMSE_t(p_gen[:,d], p_recon[:,d]) / (range_t(p_recon[:,d]) + eps_p) )
 
 where:
-  d: dimension index (e.g. 0,1,2 for 3DoF)
-  MSE_t: mean squared error over time axis
-  Var_t: variance over time axis (of GT reconstruction)
-  q_gen, p_gen: generated trajectory (position, momentum)
-  q_recon, p_recon: MuJoCo reconstructed trajectory from initial state + torques
+  d: dimension index
+  RMSE_t: root mean squared error over time
+  range_t: max-min over time
 ```
 
-Per-dimension normalization ensures each degree of freedom contributes equally regardless of scale. The final NMSE is the mean of per-dimension NMSE values.
+- `q_gen`, `p_gen`: generated trajectory
+- `q_recon`, `p_recon`: MuJoCo reconstruction from generated initial state + same torque sequence
+
+Lower is better.
 
 ---
 
-## 3. HNN Forward Rollout NMSE
+## 3. HNN Forward Rollout Baseline
 
-Symplectic Euler integration from initial state, compared against MuJoCo ground truth:
+Symplectic Euler integration from initial state:
 
 ```
 p_new = p + dt * (-dH/dq + τ)
 q_new = q + dt * dH/dp
 ```
 
-This serves as a baseline: pure HNN rollout without the diffusion model.
+This is a non-diffusion baseline: pure HNN rollout under the same torque sequence.
 
 ---
 
-## 4. Current Scripts
+## 4. Current Comparison Protocol (Active)
+
+This round uses:
+
+- Protocol: **Protocol 2 only** (generate length 1000, then trim to target length)
+- Systems: 2DoF, 3DoF
+- Policies: sinusoidal, gp, spline, zero
+- Lengths: 50, 100, ..., 1000
+- Groups:
+  - Unguided DPF
+  - Guided DPF
+  - Unguided Diffusion baseline
+  - Guided Diffusion baseline
+  - HNN rollout
+- Diffusion baseline backbone: `--backbone transformer`
+  - architecture details: `docs/transformer_baseline_architecture.md`
+
+### Main scripts
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/compute_ablation_2dof_with_smoothing.py` | Generate DPF trajectories (unguided + guided) and compute NMSE/HamRes metrics for both 2DoF and 3DoF |
-| `scripts/compute_hnn_rollout_nmse_unified.py` | Compute HNN forward rollout NMSE baseline for both systems |
-| `scripts/plot_hamres_combined.py` | HamRes plot: 1x2 (2DoF, 3DoF), mean +/- std bands, linear scale |
-| `scripts/plot_nmse_combined.py` | NMSE plot: 2x2 (2DoF/3DoF x q/p), mean +/- std bands + HNN rollout, linear scale |
+| `scripts/train_transformer_fixed_length.sh` | Train fixed-length diffusion baseline with transformer backbone |
+| `scripts/run_fixed_time_transformer_training.sh` | Launch fixed-time transformer runs aligned to original DPF wall-clock budgets |
+| `scripts/run_same_budget_guidance_search_3dof.py` | Same-budget guidance search (supports `--system 2dof/3dof`) |
+| `scripts/run_same_budget_guidance_search_transformer.sh` | Convenience launcher using latest transformer ckpts for `2dof,3dof` |
+| `scripts/run_protocol2_2dof_diffusion_vs_dpf_hnn_boxplots.py` | Protocol-2 evaluation + plots for 2DoF |
+| `scripts/run_protocol2_3dof_diffusion_vs_dpf_boxplots.py` | Protocol-2 evaluation + plots for 3DoF |
+| `scripts/run_protocol2_transformer_vs_dpf_hnn.sh` | Run both Protocol-2 evaluations using latest transformer ckpts |
+| `scripts/build_protocol2_transformer_reports.py` | Build final absolute/ratio/probability summary csv + report plots |
+| `scripts/run_protocol2_transformer_posttrain.sh` | One-shot post-train pipeline: search + Protocol-2 eval + final reports |
 
-### Usage
+### Typical usage
 
 ```bash
-# DPF metrics (per GPU, per policy)
-CUDA_VISIBLE_DEVICES=0 python scripts/compute_ablation_2dof_with_smoothing.py \
-  --system 2dof --policy sinusoidal --smooth_sigma 5.0 --num_samples 100
+# 1) Fixed-time transformer training
+bash scripts/run_fixed_time_transformer_training.sh
 
-# HNN rollout baseline
-python scripts/compute_hnn_rollout_nmse_unified.py --system 2dof --policy sinusoidal
+# 2) Same-budget guidance search (2DoF + 3DoF)
+bash scripts/run_same_budget_guidance_search_transformer.sh \
+  --policies sinusoidal,gp,zero,spline --lengths 100,300,700,1000 --seeds 10,11
 
-# Plots
-python scripts/plot_hamres_combined.py
-python scripts/plot_nmse_combined.py
+# 3) Full Protocol-2 comparison
+bash scripts/run_protocol2_transformer_vs_dpf_hnn.sh
+
+# 4) Final summary csv + report plots
+python scripts/build_protocol2_transformer_reports.py
+
+# Optional one-shot post-train pipeline
+bash scripts/run_protocol2_transformer_posttrain.sh
 ```
 
 ---
 
-## 5. System Configuration
+## 5. Main Outputs (Current)
 
-| | 2DoF | 3DoF |
-|---|---|---|
-| DPF checkpoint | `checkpoints/2dof/trajectory_dpf_...val_loss=0.0008.ckpt` | `checkpoints/trajectory_dpf_...val_loss=0.0010.ckpt` |
-| HNN checkpoint | `checkpoints/2dof/SeperableHNN-2DOF-epoch-epoch=999.ckpt` | `checkpoints/StructuredHNN-dim256-epoch-epoch=749.ckpt` |
-| MuJoCo XML | `configs/rigid_arm_hinge_2dof.xml` | `configs/rigid_arm_hinge.xml` |
-| qpos_dim | 2 | 3 |
-| guidance_steps | 10 | 25 |
-| guidance_lr | 0.0001 | 0.01 |
-| guidance_after_steps | 45 | 45 |
-
-### Torque Data
-
-All torques sourced from 3DoF files (shape [1000, 1500, 3]). 2DoF slices `[:, :, :2]`.
-
-| Policy | Source file |
-|--------|------------|
-| sinusoidal | `data/sinusoidal_torques_1000_L1500.h5` |
-| gp | `data/gp_torques_1000_L1500.h5` |
-| spline | `data/spline_torques_1000_L1500.h5` |
-| zero | zeros (generated) |
-
-### Constants
-
-- DATA_DT = 0.0002, SIM_DT = 0.0001
-- smooth_sigma = 5.0 (Gaussian smoothing on x0 during DDIM sampling)
-- num_samples = 100, DDIM 50 steps
-- Trajectory lengths: 50, 100, 150, ..., 1500 (30 values)
+- Search outputs:
+  - `output_ablation/same_budget_guidance_search_2dof_*/search_detail.csv`
+  - `output_ablation/same_budget_guidance_search_3dof_*/search_detail.csv`
+  - corresponding `summary_by_candidate.csv` and `best_configs.json`
+- Protocol-2 outputs:
+  - `output_ablation/protocol2_2dof_*`
+  - `output_ablation/protocol2_3dof_*`
+  - per-sample metrics csv + manifests + boxplots
+- Final report outputs:
+  - `output_ablation/protocol2_transformer_reports/absolute_metrics_summary.csv`
+  - `output_ablation/protocol2_transformer_reports/guidance_ratio_probability_summary.csv`
+  - `plots/protocol2_transformer_reports/*.png`
 
 ---
 
-## 6. Output Files
-
-### DPF Metrics (8 CSV files, 30 rows each)
-
-```
-output_ablation/results/
-├── 2dof_smoothed/
-│   └── metrics_{sinusoidal,gp,zero,spline}_sigma5.0.csv
-└── 3dof_smoothed/
-    └── metrics_{sinusoidal,gp,zero,spline}_sigma5.0.csv
-```
-
-Columns: `sigma, trajectory_length, {unguided,guided}_{nmse_q,nmse_p,hamres}_{mean,std,p25,median,p95,p99}`
-
-### HNN Rollout Baseline (8 CSV files, 30 rows each)
-
-```
-output_ablation/results/
-├── 2dof_smoothed/
-│   └── hnn_rollout_nmse_{sinusoidal,gp,zero,spline}.csv
-└── 3dof_smoothed/
-    └── hnn_rollout_nmse_{sinusoidal,gp,zero,spline}.csv
-```
-
-Columns: `trajectory_length, hnn_nmse_q_mean, hnn_nmse_q_std, hnn_nmse_p_mean, hnn_nmse_p_std`
-
-### Plots
-
-- `plots/ablation_hamres_combined.png` — 1x2 (2DoF, 3DoF), mean +/- std bands
-- `plots/ablation_nmse_combined.png` — 2x2 (rows: 2DoF/3DoF, cols: NMSE_q/NMSE_p), mean +/- std bands + HNN rollout
-
----
-
-## 7. Quick Reference
+## 6. Quick Reference
 
 | Metric | What it measures | Normalization | Lower is better |
 |--------|------------------|---------------|-----------------|
-| HamRes | Physics consistency (Hamilton's eqs) | HNN training variances | Yes |
-| NMSE | Trajectory accuracy vs MuJoCo | Per-trajectory variance | Yes |
+| HamRes | Physics consistency (Hamilton's eqs) | robust residual normalization + pseudo-Huber + median-over-time | Yes |
+| NRMSE(range) | Trajectory accuracy vs MuJoCo | RMSE / (reference range + eps) | Yes |
 
-### GT Reference
-- HamRes: ~0.0003 (near zero, perfect physics)
-- NMSE: 0 (by definition, GT = reconstruction)
+---
+
+## 7. Legacy Note
+
+Older files in this repo may still mention:
+
+- NMSE-only summaries
+- Protocol 1 (direct length generation)
+- fixed-diffusion PerceiverIO baselines
+
+For the current comparison round, follow Section 4 in this memo.

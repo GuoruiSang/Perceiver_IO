@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Same-budget guidance search for 3DoF on DPF vs fixed-length diffusion.
+"""Same-budget guidance search on DPF vs fixed-length diffusion.
 
 Goal:
   - Use the same guidance search space and same evaluation budget.
   - Pick best config for each model family (DPF, fixed diffusion) by NRMSE_q/p.
 
 Output:
-  - output_ablation/same_budget_guidance_search_3dof/search_detail.csv
-  - output_ablation/same_budget_guidance_search_3dof/summary_by_candidate.csv
-  - output_ablation/same_budget_guidance_search_3dof/best_configs.json
+  - output_ablation/same_budget_guidance_search_{system}/search_detail.csv
+  - output_ablation/same_budget_guidance_search_{system}/summary_by_candidate.csv
+  - output_ablation/same_budget_guidance_search_{system}/best_configs.json
 """
 
 from __future__ import annotations
@@ -303,7 +303,7 @@ def pick_best(summary_rows: list[dict]) -> dict | None:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--system", default="3dof", choices=["3dof"])
+    parser.add_argument("--system", default="3dof", choices=["2dof", "3dof"])
     parser.add_argument("--policies", default="sinusoidal,gp,zero,spline")
     parser.add_argument("--lengths", default="100,300,500,700,900,1000")
     parser.add_argument("--seeds", default="10,11,12")
@@ -311,13 +311,10 @@ def main():
     parser.add_argument("--num-candidates", type=int, default=24)
     parser.add_argument("--num-diff-steps", type=int, default=20)
     parser.add_argument("--search-seed", type=int, default=2026)
-    parser.add_argument(
-        "--fixed-diff-ckpt",
-        default="checkpoints/trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&FixedTrajLength1000&UniformContext&EncoderNone&DecoderAttentions:epoch=2999_val_loss:val_loss=0.0008.ckpt",
-    )
+    parser.add_argument("--fixed-diff-ckpt", default="")
     parser.add_argument(
         "--out-dir",
-        default="output_ablation/same_budget_guidance_search_3dof",
+        default="",
     )
     args = parser.parse_args()
 
@@ -329,9 +326,25 @@ def main():
     qe.DEVICE = str(device)
     print(f"[search] device={device}")
 
-    cfg_base = dict(SYSTEM_CONFIGS["3dof"])
+    cfg_base = dict(SYSTEM_CONFIGS[args.system])
     spec_dpf = ModelSpec(name="dpf", dpf_ckpt=Path(cfg_base["dpf_ckpt"]))
-    spec_fix = ModelSpec(name="fixed_diffusion", dpf_ckpt=(project_root / args.fixed_diff_ckpt).resolve())
+
+    default_fixed_ckpt = {
+        "2dof": (
+            "checkpoints/2dof/"
+            "trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&"
+            "FixedTrajLength1000&UniformContext&EncoderNone&DecoderAttentions:"
+            "epoch=2999_val_loss:val_loss=0.0008.ckpt"
+        ),
+        "3dof": (
+            "checkpoints/"
+            "trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&"
+            "FixedTrajLength1000&UniformContext&EncoderNone&DecoderAttentions:"
+            "epoch=2999_val_loss:val_loss=0.0008.ckpt"
+        ),
+    }[args.system]
+    fixed_diff_ckpt = args.fixed_diff_ckpt.strip() or default_fixed_ckpt
+    spec_fix = ModelSpec(name="fixed_diffusion", dpf_ckpt=(project_root / fixed_diff_ckpt).resolve())
 
     all_cands = build_candidate_pool()
     rng = random.Random(args.search_seed)
@@ -339,7 +352,8 @@ def main():
     candidates = all_cands[: min(args.num_candidates, len(all_cands))]
     print(f"[search] candidates={len(candidates)} (from pool={len(all_cands)})")
 
-    out_dir = (project_root / args.out_dir).resolve()
+    out_dir_rel = args.out_dir.strip() or f"output_ablation/same_budget_guidance_search_{args.system}"
+    out_dir = (project_root / out_dir_rel).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     detail_csv = out_dir / "search_detail.csv"
     summary_csv = out_dir / "summary_by_candidate.csv"
@@ -347,7 +361,7 @@ def main():
     manifest_json = out_dir / "manifest.json"
 
     manifest = dict(
-        system="3dof",
+        system=args.system,
         policies=policies,
         lengths=lengths,
         seeds=seeds,

@@ -2,6 +2,10 @@
 
 **Date**: 2026-02-06
 
+> Note (historical): this page records a PerceiverIO fixed-length run at that time.
+> The current standard-diffusion baseline for new comparisons is `--backbone transformer`.
+> See `docs/transformer_baseline_architecture.md` for the exact current baseline architecture.
+
 ## Objective
 
 Train a fixed-length (non-DPF) diffusion model for the 3DoF hinge arm, using the same PerceiverIO architecture and the same sinusoidal-only training data. The only difference from the existing DPF model is that training uses a single fixed trajectory length instead of random variable lengths (100-1000).

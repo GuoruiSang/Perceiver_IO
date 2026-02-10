@@ -147,6 +147,50 @@ class TrajectoryPerceiverIO(nn.Module):
         return predictions
 
 
+class TrajectoryTransformerDiffusion(nn.Module):
+    """Transformer diffusion baseline without latent bottleneck.
+
+    Expects full-sequence tokens and predicts full-sequence noise in one pass.
+    """
+
+    def __init__(
+        self,
+        num_input_channels: int,
+        num_output_channels: int,
+        d_model: int = 256,
+        num_layers: int = 4,
+        nhead: int = 8,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.input_proj = nn.Linear(num_input_channels, d_model)
+        self.input_norm = nn.LayerNorm(d_model)
+
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=d_model * 4,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers)
+        self.output_norm = nn.LayerNorm(d_model)
+        self.output_proj = nn.Linear(d_model, num_output_channels)
+
+    def forward(self, x_tokens: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x_tokens: [B, T, C_in]
+        Returns:
+            predictions: [B, T, C_out]
+        """
+        h = self.input_norm(self.input_proj(x_tokens))
+        h = self.encoder(h)
+        return self.output_proj(self.output_norm(h))
+
+
 # =============================================================================
 # DiT-style AdaLN Conditioned PerceiverIO
 # =============================================================================

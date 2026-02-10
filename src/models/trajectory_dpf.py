@@ -38,7 +38,13 @@ from scripts.dataset import TrajectoryDPFCached
 from src import config
 from src.training.utils import compute_normalization_stats
 
-from src.models.architectures import TrajectoryOutputAdapter, TrajectoryPerceiverIO, ConditionedTrajectoryPerceiverIO, AblationConfig
+from src.models.architectures import (
+    TrajectoryOutputAdapter,
+    TrajectoryPerceiverIO,
+    TrajectoryTransformerDiffusion,
+    ConditionedTrajectoryPerceiverIO,
+    AblationConfig,
+)
 import tempfile
 import numpy as np
 
@@ -179,6 +185,7 @@ class TrajectoryDPF(pl.LightningModule):
         p_uncond: float = 0.1,  # Probability of dropping conditioning for CFG
         lambda_cond: float = 0.1,  # Weight for conditioning regularization loss
         encoder_cond_mode: str = "none",  # "per_step", "mean", "rnn" or "none" for encoder conditioning
+        backbone: str = "perceiverio",  # "perceiverio" or "transformer"
         # Ablation study configuration
         ablation_config: Optional[AblationConfig] = None,
         # Simulation metadata (loaded from dataset)
@@ -209,6 +216,7 @@ class TrajectoryDPF(pl.LightningModule):
         self.p_uncond = p_uncond  # CFG dropout probability
         self.lambda_cond = lambda_cond  # Conditioning regularization weight
         self.encoder_cond_mode = encoder_cond_mode
+        self.backbone = backbone
         self.ablation_config = ablation_config if ablation_config is not None else AblationConfig()
 
         # Simulation metadata for physics-consistent sampling
@@ -267,19 +275,29 @@ class TrajectoryDPF(pl.LightningModule):
         self.register_buffer("diffusion_encoding_table", diffusion_table, persistent=True)
         self.register_buffer("temporal_encoding_table", temporal_table, persistent=True)
         
-        # PerceiverIO backbone with per-step state-torque interaction conditioning
-        self.model = ConditionedTrajectoryPerceiverIO(
-            num_input_channels=num_input_channels,
-            num_output_channels=self.state_dim,  # Predict noise for (qpos, mom) only
-            state_dim=self.state_dim,
-            torque_dim=torque_dim,
-            num_latents=num_latents,
-            num_latent_channels=num_latent_channels,
-            cond_dim=cond_dim,
-            num_decoder_blocks=num_decoder_blocks,  # Pass it down
-            encoder_cond_mode=encoder_cond_mode,
-            ablation_config=self.ablation_config,
-        )
+        if self.backbone == "transformer":
+            # Transformer diffusion baseline: full tokens [state|torque|diff|temp].
+            self.model = TrajectoryTransformerDiffusion(
+                num_input_channels=num_input_channels + self.torque_dim,
+                num_output_channels=self.state_dim,
+                d_model=num_latent_channels,
+                num_layers=max(1, num_decoder_blocks),
+                nhead=8,
+            )
+        else:
+            # PerceiverIO backbone with per-step state-torque interaction conditioning
+            self.model = ConditionedTrajectoryPerceiverIO(
+                num_input_channels=num_input_channels,
+                num_output_channels=self.state_dim,  # Predict noise for (qpos, mom) only
+                state_dim=self.state_dim,
+                torque_dim=torque_dim,
+                num_latents=num_latents,
+                num_latent_channels=num_latent_channels,
+                cond_dim=cond_dim,
+                num_decoder_blocks=num_decoder_blocks,  # Pass it down
+                encoder_cond_mode=encoder_cond_mode,
+                ablation_config=self.ablation_config,
+            )
         
         # Diffusion schedule (cosine)
         s = 0.008
@@ -451,20 +469,26 @@ class TrajectoryDPF(pl.LightningModule):
         state: torch.Tensor,
         diffusion_t: int, 
         skip_normalize: bool = False,
+        torque: Optional[torch.Tensor] = None,
+        include_torque: bool = False,
     ) -> torch.Tensor:
         """
         Build tokens from state with explicit temporal position encoding.
         
-        NOTE: Torque is NOT included in tokens - it's passed separately to the model
-        for per-step AdaLN conditioning with state-torque interaction.
+        PerceiverIO mode:
+            [state | diffusion_enc | temporal_enc]
+        Transformer baseline mode (include_torque=True):
+            [state | torque | diffusion_enc | temporal_enc]
         
         Args:
             state: [B, T, state_dim] - batch of state trajectories (qpos, mom)
             diffusion_t: diffusion timestep (1 to diffusion_steps)
             skip_normalize: if True, assumes inputs are already in normalized space
+            torque: [B, T, torque_dim] normalized torque
+            include_torque: include torque after state slice
         
         Returns:
-            tokens: [B, T, C_in] where C_in = state + diffusion_enc + temporal_enc
+            tokens: [B, T, C_in]
         """
         B, T, _ = state.shape
         device = state.device
@@ -487,9 +511,12 @@ class TrajectoryDPF(pl.LightningModule):
             temporal_enc = self._get_temporal_encoding(T, device).to(dtype=normalized_state.dtype)
         temporal_enc = temporal_enc.unsqueeze(0).expand(B, -1, -1)  # [B, T, temp_enc_dim]
 
-        # Concatenate: [state | diffusion_enc | temporal_enc]
-        # NOTE: Torque is NOT included - passed separately for AdaLN conditioning
-        tokens = torch.cat([normalized_state, diffusion_enc, temporal_enc], dim=-1)
+        if include_torque:
+            if torque is None:
+                raise ValueError("torque must be provided when include_torque=True")
+            tokens = torch.cat([normalized_state, torque, diffusion_enc, temporal_enc], dim=-1)
+        else:
+            tokens = torch.cat([normalized_state, diffusion_enc, temporal_enc], dim=-1)
         
         return tokens
     
@@ -555,15 +582,7 @@ class TrajectoryDPF(pl.LightningModule):
         # Sample context length uniformly from [1, T_train-1]
         num_context = torch.randint(1, T_train, (1,)).item()
         
-        # Build full token array once (NO torque in tokens), then apply noise once.
-        # IMPORTANT: keep contexts as a slice of the (noisy) queries so training matches sampling
-        tokens = self.build_tokens(state, diffusion_t)  # [B, T, C_in]
-        noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)  # noise on state slice only
-
-        noisy_queries = noisy_tokens
-        noisy_contexts = noisy_tokens[:, :num_context, :]
-        
-        # Normalize torque for conditioning (passed separately to model)
+        # Normalize torque for conditioning
         torque_norm = self.normalize_cond(torque)
         
         # ========== CFG DROPOUT (classifier-free guidance training) ==========
@@ -571,8 +590,20 @@ class TrajectoryDPF(pl.LightningModule):
         if torch.rand(1).item() < self.p_uncond:
             torque_norm = torch.zeros_like(torque_norm)
 
-        # Predict noise (torque passed separately for per-step AdaLN conditioning)
-        predictions = self.model(noisy_contexts, noisy_queries, torque_norm)
+        if self.backbone == "transformer":
+            tokens = self.build_tokens(
+                state, diffusion_t, torque=torque_norm, include_torque=True
+            )
+            noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+            predictions = self.model(noisy_tokens)
+        else:
+            # Build full token array once (NO torque in tokens), then apply noise once.
+            # IMPORTANT: keep contexts as a slice of the (noisy) queries so training matches sampling
+            tokens = self.build_tokens(state, diffusion_t)
+            noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+            noisy_queries = noisy_tokens
+            noisy_contexts = noisy_tokens[:, :num_context, :]
+            predictions = self.model(noisy_contexts, noisy_queries, torque_norm)
             
         # Main loss: predict noise with stability safeguards
         loss_denoise = F.mse_loss(predictions, noise)
@@ -607,23 +638,28 @@ class TrajectoryDPF(pl.LightningModule):
         
         diffusion_t = torch.randint(1, self.diffusion_steps + 1, (1,)).item()
         
-        # Build tokens (NO torque in tokens)
-        tokens = self.build_tokens(state, diffusion_t)
-        
-        # Use fixed context fraction for validation - PREFIX context
-        context_fraction = 0.5
-        num_context = max(1, min(T - 1, int(T * context_fraction)))
-        
-        # Apply noise once, then slice PREFIX context from the same noisy token array.
-        noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
-        noisy_queries = noisy_tokens  # [B, T, C_in]
-        noisy_contexts = noisy_tokens[:, :num_context, :]  # [B, num_context, C_in]
-        
-        # Normalize torque for conditioning (passed separately)
+        # Normalize torque for conditioning
         torque_norm = self.normalize_cond(torque)
-        
-        # Predict noise (torque passed separately for per-step AdaLN conditioning)
-        predictions = self.model(noisy_contexts, noisy_queries, torque_norm)
+
+        if self.backbone == "transformer":
+            tokens = self.build_tokens(
+                state, diffusion_t, torque=torque_norm, include_torque=True
+            )
+            noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+            predictions = self.model(noisy_tokens)
+        else:
+            # Build tokens (NO torque in tokens)
+            tokens = self.build_tokens(state, diffusion_t)
+
+            # Use fixed context fraction for validation - PREFIX context
+            context_fraction = 0.5
+            num_context = max(1, min(T - 1, int(T * context_fraction)))
+
+            # Apply noise once, then slice PREFIX context from the same noisy token array.
+            noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+            noisy_queries = noisy_tokens
+            noisy_contexts = noisy_tokens[:, :num_context, :]
+            predictions = self.model(noisy_contexts, noisy_queries, torque_norm)
         loss = F.mse_loss(predictions, noise)
         
         # Log validation loss (epoch-level only)
@@ -945,35 +981,54 @@ class TrajectoryDPF(pl.LightningModule):
         
         print(f"[Sampling] CFG guidance_scale={guidance_scale}")
         
-        # PREFIX context: use first num_context timesteps (not random)
-        # IMPORTANT: Cap context length to training max to avoid OOD encoder behavior when extending
-        max_context_train = int(self.max_timesteps * context_fraction)
-        num_context = max(1, min(trajectory_length - 1, max_context_train))
-        print(f"[Sampling] Context length: {num_context} (capped at {max_context_train} from training length {self.max_timesteps})")
+        if self.backbone != "transformer":
+            # PREFIX context: use first num_context timesteps (not random)
+            # IMPORTANT: Cap context length to training max to avoid OOD encoder behavior when extending
+            max_context_train = int(self.max_timesteps * context_fraction)
+            num_context = max(1, min(trajectory_length - 1, max_context_train))
+            print(f"[Sampling] Context length: {num_context} (capped at {max_context_train} from training length {self.max_timesteps})")
 
         for i, t in enumerate(tqdm(ts, total=len(ts), desc="Sampling")):
             t_int = int(t.item())
             
-            # Build tokens (NO torque in tokens): [state | diffusion_enc | temporal_enc]
-            queries = self.build_tokens(x, t_int + 1, skip_normalize=True)
-            
-            # PREFIX context: first num_context timesteps
-            contexts = queries[:, :num_context, :]
-            
-            # Predict noise conditionally (torque passed separately for per-step AdaLN)
-            with torch.no_grad():
-                eps_cond = self.model(contexts, queries, cond)
-            
-            # CFG: if guidance_scale != 1.0, also predict unconditionally
-            if guidance_scale != 1.0:
-                # Predict with zeroed torque for unconditional
+            if self.backbone == "transformer":
+                cond_tokens = self.build_tokens(
+                    x, t_int + 1, skip_normalize=True, torque=cond, include_torque=True
+                )
                 with torch.no_grad():
-                    eps_uncond = self.model(contexts, queries, cond_uncond)
-                
-                # CFG combination
-                eps = eps_uncond + guidance_scale * (eps_cond - eps_uncond)
+                    eps_cond = self.model(cond_tokens)
+
+                # CFG: if guidance_scale != 1.0, also predict unconditionally
+                if guidance_scale != 1.0:
+                    uncond_tokens = self.build_tokens(
+                        x, t_int + 1, skip_normalize=True, torque=cond_uncond, include_torque=True
+                    )
+                    with torch.no_grad():
+                        eps_uncond = self.model(uncond_tokens)
+                    eps = eps_uncond + guidance_scale * (eps_cond - eps_uncond)
+                else:
+                    eps = eps_cond
             else:
-                eps = eps_cond
+                # Build tokens (NO torque in tokens): [state | diffusion_enc | temporal_enc]
+                queries = self.build_tokens(x, t_int + 1, skip_normalize=True)
+
+                # PREFIX context: first num_context timesteps
+                contexts = queries[:, :num_context, :]
+
+                # Predict noise conditionally (torque passed separately for per-step AdaLN)
+                with torch.no_grad():
+                    eps_cond = self.model(contexts, queries, cond)
+
+                # CFG: if guidance_scale != 1.0, also predict unconditionally
+                if guidance_scale != 1.0:
+                    # Predict with zeroed torque for unconditional
+                    with torch.no_grad():
+                        eps_uncond = self.model(contexts, queries, cond_uncond)
+
+                    # CFG combination
+                    eps = eps_uncond + guidance_scale * (eps_cond - eps_uncond)
+                else:
+                    eps = eps_cond
             
             # Extract current state
             x_t = x  # Already just the state part (not in tokens)
@@ -1262,6 +1317,9 @@ def main():
     parser.add_argument("--num_latents", type=int, default=config.DEFAULT_NUM_LATENTS)
     parser.add_argument("--num_latent_channels", type=int, default=config.DEFAULT_NUM_LATENT_CHANNELS)
     parser.add_argument("--diffusion_steps", type=int, default=config.DEFAULT_DIFFUSION_STEPS)
+    parser.add_argument("--backbone", type=str, default="perceiverio",
+                        choices=["perceiverio", "transformer"],
+                        help="Backbone type: perceiverio (default) or transformer baseline")
     parser.add_argument("--num_decoder_blocks", type=int, default=4,
                         help="Number of self-attention blocks in the decoder for trajectory refinement")
     parser.add_argument("--max_trajectories", type=int, default=0,
@@ -1741,6 +1799,7 @@ def main():
         trajectory_length_training_options=traj_length_options,
         lr=args.lr,
         encoder_cond_mode="none",  # Encoder conditioning: "per_step", "mean", "rnn" or "none"
+        backbone=args.backbone,
         ablation_config=ablation_config,
         dt=dt,
         data_dt=data_dt,
@@ -1770,6 +1829,8 @@ def main():
                     wandb_run_name = f"{wandb_run_name}_FixedTrajLength{args.fixed_trajectory_length}" if wandb_run_name else f"FixedTrajLength{args.fixed_trajectory_length}"
             if args.ablation:
                 wandb_run_name = f"{wandb_run_name}_ablation-{args.ablation}" if wandb_run_name else f"ablation-{args.ablation}"
+            if args.backbone == "transformer":
+                wandb_run_name = f"{wandb_run_name}_backbone-transformer" if wandb_run_name else "backbone-transformer"
             logger = WandbLogger(
                 project=args.wandb_project,
                 name=wandb_run_name,
@@ -1794,6 +1855,7 @@ def main():
                 'num_decoder_blocks': args.num_decoder_blocks,
                 'diffusion_steps': args.diffusion_steps,
                 'epochs': args.epochs,
+                'backbone': args.backbone,
                 'fixed_trajectory_length': args.fixed_trajectory_length,
                 'trajectory_length_training_options': list(traj_length_options),
             })
@@ -1803,10 +1865,11 @@ def main():
     callbacks = []
     
     ablation_tag = f"_ablation-{args.ablation}" if args.ablation else ""
+    backbone_tag = "_backbone-transformer" if args.backbone == "transformer" else ""
     length_tag = f"FixedTrajLength{args.fixed_trajectory_length}" if args.fixed_trajectory_length else "VariableTrajLength"
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename=f'trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&{length_tag}&UniformContext&EncoderNone&DecoderAttentions{ablation_tag}:{{epoch:03d}}_val_loss:{{val_loss:.4f}}',
+        filename=f'trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&{length_tag}&UniformContext&EncoderNone&DecoderAttentions{ablation_tag}{backbone_tag}:{{epoch:03d}}_val_loss:{{val_loss:.4f}}',
         every_n_epochs=10,  # Save checkpoint every 10 epochs
     )
     callbacks.append(checkpoint_callback)
