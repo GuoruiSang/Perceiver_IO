@@ -277,11 +277,11 @@ def main():
                     'resampled_torques': gui_torques.detach().cpu(),
                 }, traj_path)
 
-                ung_rq, ung_rp, ung_hr, _, _ = compute_rmse_for_samples(
+                ung_rq, ung_rp, ung_hr = compute_rmse_for_samples(
                     ung_states, ung_torques, num_samples, mj_model, hnn, var_dq, var_dp, qpos_dim,
                     desc=f"ung_{cid}", hamres_kwargs=hamres_kwargs,
                 )
-                gui_rq, gui_rp, gui_hr, _, _ = compute_rmse_for_samples(
+                gui_rq, gui_rp, gui_hr = compute_rmse_for_samples(
                     gui_states, gui_torques, num_samples, mj_model, hnn, var_dq, var_dp, qpos_dim,
                     desc=f"gui_{cid}", hamres_kwargs=hamres_kwargs,
                 )

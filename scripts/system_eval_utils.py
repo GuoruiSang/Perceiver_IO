@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from src.models.HNN import HNNWrapper
-from src.models.trajectory_dpf import TrajectoryDPF
+from src.models.trajectory_dpf_model import TrajectoryDPF
 from src.models.utils import EMA, reconstruct_traj_with_momentum
 
 
@@ -97,14 +97,7 @@ def load_dpf_with_ema(ckpt_path, device):
 
 
 def load_hnn_with_stats(ckpt_path, device):
-    checkpoint = torch.load(str(ckpt_path), map_location=device, weights_only=False)
-    hparams = checkpoint.get("hyper_parameters", {})
-    hnn_kwargs = {}
-    if "model_type" not in hparams:
-        hnn_kwargs["model_type"] = "separable"
-    del checkpoint
-
-    hnn = HNNWrapper.load_from_checkpoint(str(ckpt_path), map_location=device, strict=False, **hnn_kwargs)
+    hnn = HNNWrapper.load_from_checkpoint(str(ckpt_path), map_location=device, strict=False)
     hnn.eval().to(device)
     var_dq = hnn.qvel_var.mean().to(device)
     var_dp = hnn.mom_dot_var.mean().to(device)
@@ -210,43 +203,6 @@ def compute_hamres(
     return per_t.median().item()
 
 
-def compute_nmse(state, torque, mj_model, qpos_dim, dt=DT, sim_dt=SIM_DT):
-    qpos = state[:, :qpos_dim].cpu().numpy()
-    mom = state[:, qpos_dim:].cpu().numpy()
-    torque_np = torque.cpu().numpy()
-    t_len = qpos.shape[0]
-
-    data = mujoco.MjData(mj_model)
-    data.qpos[:] = qpos[0]
-    data.qvel[:] = 0
-    mujoco.mj_forward(mj_model, data)
-    m_mat = np.zeros((mj_model.nv, mj_model.nv))
-    mujoco.mj_fullM(mj_model, m_mat, data.qM)
-    initial_qvel = np.linalg.solve(m_mat, mom[0])
-
-    recon = reconstruct_traj_with_momentum(
-        mj_model,
-        t_len,
-        sim_dt,
-        qpos[0],
-        initial_qvel,
-        torque_np,
-        data_dt=dt,
-        trajectory_alignment="pre_step",
-    )
-    gt_qpos = recon["seq_qpos"]
-    gt_mom = recon["seq_mom"]
-
-    t_min = min(len(qpos), len(gt_qpos))
-    mse_q_per_dim = ((qpos[:t_min] - gt_qpos[:t_min]) ** 2).mean(axis=0)
-    mse_p_per_dim = ((mom[:t_min] - gt_mom[:t_min]) ** 2).mean(axis=0)
-    var_q_per_dim = np.var(gt_qpos[:t_min], axis=0)
-    var_p_per_dim = np.var(gt_mom[:t_min], axis=0)
-    nmse_q_per_dim = np.where(var_q_per_dim > 1e-12, mse_q_per_dim / var_q_per_dim, 0.0)
-    nmse_p_per_dim = np.where(var_p_per_dim > 1e-12, mse_p_per_dim / var_p_per_dim, 0.0)
-    return float(nmse_q_per_dim.mean()), float(nmse_p_per_dim.mean()), nmse_q_per_dim, nmse_p_per_dim
-
-
 def compute_rmse(state, torque, mj_model, qpos_dim, dt=DT, sim_dt=SIM_DT):
     qpos = state[:, :qpos_dim].cpu().numpy()
     mom = state[:, qpos_dim:].cpu().numpy()
@@ -277,74 +233,7 @@ def compute_rmse(state, torque, mj_model, qpos_dim, dt=DT, sim_dt=SIM_DT):
     t_min = min(len(qpos), len(gt_qpos))
     rmse_q_per_dim = np.sqrt(((qpos[:t_min] - gt_qpos[:t_min]) ** 2).mean(axis=0))
     rmse_p_per_dim = np.sqrt(((mom[:t_min] - gt_mom[:t_min]) ** 2).mean(axis=0))
-    return float(rmse_q_per_dim.mean()), float(rmse_p_per_dim.mean()), rmse_q_per_dim, rmse_p_per_dim
-
-
-def stats_dict(prefix, values):
-    if not values:
-        return {f"{prefix}_{k}": np.nan for k in ["mean", "std", "p25", "median", "p95", "p99"]}
-    arr = np.array(values)
-    return {
-        f"{prefix}_mean": np.mean(arr),
-        f"{prefix}_std": np.std(arr),
-        f"{prefix}_p25": np.percentile(arr, 25),
-        f"{prefix}_median": np.median(arr),
-        f"{prefix}_p95": np.percentile(arr, 95),
-        f"{prefix}_p99": np.percentile(arr, 99),
-    }
-
-
-def generate_batch(dpf, num_samples, length, batch_torques, batch_size, guidance_kwargs, initial_noise=None):
-    all_states, all_torques = [], []
-    for batch_start in range(0, num_samples, batch_size):
-        batch_end = min(batch_start + batch_size, num_samples)
-        bt = batch_torques[batch_start:batch_end]
-        bn = initial_noise[batch_start:batch_end] if initial_noise is not None else None
-        state, torque_out = dpf.sample_trajectories(
-            num_samples=bt.shape[0],
-            trajectory_length=length,
-            context_fraction=0.5,
-            use_ema=True,
-            torque=bt,
-            initial_noise=bn,
-            **guidance_kwargs,
-        )
-        all_states.append(state)
-        all_torques.append(torque_out)
-    return torch.cat(all_states, dim=0), torch.cat(all_torques, dim=0)
-
-
-def compute_metrics_for_samples(
-    states,
-    torques_out,
-    num_samples,
-    mj_model,
-    hnn,
-    var_dq,
-    var_dp,
-    qpos_dim,
-    desc="",
-    hamres_kwargs=None,
-):
-    if hamres_kwargs is None:
-        hamres_kwargs = {}
-
-    nmse_q_list, nmse_p_list, hamres_list = [], [], []
-    nmse_q_per_dim_list, nmse_p_per_dim_list = [], []
-    for i in tqdm(range(num_samples), desc=desc):
-        state = states[i]
-        tau = torques_out[i]
-        nmse_q, nmse_p, nmse_q_pd, nmse_p_pd = compute_nmse(state, tau, mj_model, qpos_dim)
-        qpos = state[:, :qpos_dim]
-        mom = state[:, qpos_dim:]
-        hr = compute_hamres(qpos, mom, tau, hnn, var_dq, var_dp, **hamres_kwargs)
-        nmse_q_list.append(nmse_q)
-        nmse_p_list.append(nmse_p)
-        nmse_q_per_dim_list.append(nmse_q_pd)
-        nmse_p_per_dim_list.append(nmse_p_pd)
-        if not np.isnan(hr):
-            hamres_list.append(hr)
-    return nmse_q_list, nmse_p_list, hamres_list, nmse_q_per_dim_list, nmse_p_per_dim_list
+    return float(rmse_q_per_dim.mean()), float(rmse_p_per_dim.mean())
 
 
 def compute_rmse_for_samples(
@@ -363,29 +252,15 @@ def compute_rmse_for_samples(
         hamres_kwargs = {}
 
     rmse_q_list, rmse_p_list, hamres_list = [], [], []
-    rmse_q_per_dim_list, rmse_p_per_dim_list = [], []
     for i in tqdm(range(num_samples), desc=desc):
         state = states[i]
         tau = torques_out[i]
-        rmse_q, rmse_p, rmse_q_pd, rmse_p_pd = compute_rmse(state, tau, mj_model, qpos_dim)
+        rmse_q, rmse_p = compute_rmse(state, tau, mj_model, qpos_dim)
         qpos = state[:, :qpos_dim]
         mom = state[:, qpos_dim:]
         hr = compute_hamres(qpos, mom, tau, hnn, var_dq, var_dp, **hamres_kwargs)
         rmse_q_list.append(rmse_q)
         rmse_p_list.append(rmse_p)
-        rmse_q_per_dim_list.append(rmse_q_pd)
-        rmse_p_per_dim_list.append(rmse_p_pd)
         if not np.isnan(hr):
             hamres_list.append(hr)
-    return rmse_q_list, rmse_p_list, hamres_list, rmse_q_per_dim_list, rmse_p_per_dim_list
-
-
-def resolve_results_output_path(system, policy, sigmas, sweep_mode):
-    if sweep_mode:
-        out_dir = project_root / "output" / "results" / f"{system}_smoothing_sweep"
-        filename = f"sweep_{policy}.csv"
-    else:
-        out_dir = project_root / "output" / "results" / f"{system}_smoothed"
-        filename = f"metrics_{policy}_sigma{sigmas[0]}.csv"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir / filename
+    return rmse_q_list, rmse_p_list, hamres_list

@@ -80,7 +80,6 @@ Here `alpha=1` is the guidance setting used by the active comparison, not the pi
 
 - One-step gradient guidance:
   - `guidance_method = strategy2`
-  - `guidance_energy_mode = one_step`
   - `guidance_num_candidates = 16`
   - `guidance_normalize_grad = True`
   - `alpha_q = alpha_p = 1.0` for:
@@ -91,7 +90,6 @@ Here `alpha=1` is the guidance setting used by the active comparison, not the pi
 
 - Resampling guidance:
   - `guidance_method = strategy1`
-  - `guidance_energy_mode = robust_hamres`
   - `guidance_num_candidates = 4`
   - `guidance_trust_lambda = 1e-3`
   - `guidance_hamres_smooth_sigma = 0.5`

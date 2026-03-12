@@ -19,7 +19,7 @@ echo "dpf train file: $DPF_TRAIN_FILE"
 echo "hnn train file: $HNN_TRAIN_FILE"
 echo "hnn val file: $HNN_VAL_FILE"
 
-nohup "$PYTHON_BIN" src/models/trajectory_dpf.py \
+nohup "$PYTHON_BIN" src/models/train_trajectory_dpf.py \
   --mode train \
   --h5_path "$DPF_TRAIN_FILE" \
   --checkpoint_dir checkpoints/2dof/dpf \

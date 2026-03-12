@@ -33,7 +33,7 @@ mkdir -p "$CHECKPOINT_DIR" "$LOG_DIR"
 LOG_FILE="$LOG_DIR/std_diffusion_${SYSTEM}_transformer_fixed_time.log"
 
 CMD=(
-  "$PYTHON_BIN" src/models/trajectory_dpf.py
+  "$PYTHON_BIN" src/models/train_trajectory_dpf.py
   --mode train
   --h5_path "$TRAIN_FILE"
   --checkpoint_dir "$CHECKPOINT_DIR"

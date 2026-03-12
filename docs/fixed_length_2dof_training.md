@@ -27,7 +27,7 @@ SYSTEM=2dof bash scripts/train/train_transformer_diffusion_fixed_length.sh
 ## Direct command
 
 ```bash
-python src/models/trajectory_dpf.py \
+python src/models/train_trajectory_dpf.py \
   --mode train \
   --h5_path data/2dof/traj_40000-steps_4000.h5 \
   --checkpoint_dir checkpoints/2dof/transformer_diffusion \

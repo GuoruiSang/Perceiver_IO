@@ -32,12 +32,11 @@ from scripts.system_eval_utils import (
     HAMRES_MIN_SCALE_Q,
     HAMRES_PSEUDO_HUBER_DELTA,
     HAMRES_SMOOTH_SIGMA,
-    SIM_DT,
     SYSTEM_CONFIGS,
     compute_hamres,
+    compute_rmse,
     load_torques,
 )
-from src.models.utils import reconstruct_traj_with_momentum
 
 
 @dataclass(frozen=True)
@@ -194,10 +193,7 @@ def run_system_eval(cfg_static: SystemEvalConfig) -> None:
 
         out = dict(guidance)
         out["guidance_method"] = params.get("strategy", "strategy2")
-        out["optimize_target"] = "both"
         strategy = out["guidance_method"]
-        default_mode = "robust_hamres" if strategy == "strategy1" else "one_step"
-        out["guidance_energy_mode"] = params.get("mode", default_mode)
         out["guidance_num_candidates"] = int(params.get("num_candidates", out.get("guidance_num_candidates", 16)))
         out["guidance_trust_lambda"] = float(params.get("trust", out["guidance_trust_lambda"]))
         out["guidance_hamres_smooth_sigma"] = float(params.get("ham_sigma", out["guidance_hamres_smooth_sigma"]))
@@ -213,45 +209,8 @@ def run_system_eval(cfg_static: SystemEvalConfig) -> None:
         )
         return out, "best_configs_json"
 
-    def compute_rmse_qp(state, tau, qpos_dim, mj_model):
-        qpos = state[:, :qpos_dim].cpu().numpy()
-        mom = state[:, qpos_dim:].cpu().numpy()
-        tau_np = tau.cpu().numpy()
-        t_len = qpos.shape[0]
-
-        data = mujoco.MjData(mj_model)
-        data.qpos[:] = qpos[0]
-        data.qvel[:] = 0
-        mujoco.mj_forward(mj_model, data)
-        M = np.zeros((mj_model.nv, mj_model.nv))
-        mujoco.mj_fullM(mj_model, M, data.qM)
-        initial_qvel = np.linalg.solve(M, mom[0])
-
-        recon = reconstruct_traj_with_momentum(
-            mj_model,
-            t_len,
-            SIM_DT,
-            qpos[0],
-            initial_qvel,
-            tau_np,
-            data_dt=DT,
-            trajectory_alignment="pre_step",
-        )
-        gt_qpos = recon["seq_qpos"]
-        gt_mom = recon["seq_mom"]
-
-        t_min = min(len(qpos), len(gt_qpos))
-        if t_min <= 0:
-            return np.nan, np.nan
-
-        e_q = qpos[:t_min] - gt_qpos[:t_min]
-        e_p = mom[:t_min] - gt_mom[:t_min]
-        rmse_q = np.sqrt((e_q**2).mean(axis=0))
-        rmse_p = np.sqrt((e_p**2).mean(axis=0))
-        return float(rmse_q.mean()), float(rmse_p.mean())
-
     def compute_rmse_and_hamres(state, tau, qpos_dim, mj_model, hnn, var_dq, var_dp, hamres_kwargs):
-        rmse_q_mean, rmse_p_mean = compute_rmse_qp(state, tau, qpos_dim, mj_model)
+        rmse_q_mean, rmse_p_mean = compute_rmse(state, tau, mj_model, qpos_dim)
 
         hr = compute_hamres(
             state[:, :qpos_dim],
@@ -304,8 +263,8 @@ def run_system_eval(cfg_static: SystemEvalConfig) -> None:
             gui_torques = bundle["guided_torques"]
 
             for sample_idx in range(ung_states.shape[0]):
-                urq, urp = compute_rmse_qp(ung_states[sample_idx], ung_torques[sample_idx], qpos_dim, mj_model)
-                grq, grp = compute_rmse_qp(gui_states[sample_idx], gui_torques[sample_idx], qpos_dim, mj_model)
+                urq, urp = compute_rmse(ung_states[sample_idx], ung_torques[sample_idx], mj_model, qpos_dim)
+                grq, grp = compute_rmse(gui_states[sample_idx], gui_torques[sample_idx], mj_model, qpos_dim)
                 rows.append(
                     {
                         "combo": combo,
@@ -380,7 +339,6 @@ def run_system_eval(cfg_static: SystemEvalConfig) -> None:
             "guidance_method": guidance["guidance_method"],
             "guidance_num_candidates": guidance["guidance_num_candidates"],
             "comparison_label": "resampling" if guidance["guidance_method"] == "strategy1" else "guided",
-            "guidance_energy_mode": guidance["guidance_energy_mode"],
             "alpha_q": float(gc.ALPHA_Q),
             "alpha_p": float(gc.ALPHA_P),
             "num_diffusion_steps": gc.NUM_DIFFUSION_STEPS,

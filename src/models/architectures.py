@@ -1,13 +1,12 @@
 """
 Model architectures for Trajectory DPF.
 
-This module contains the core model architecture classes extracted from trajectory_dpf.py:
+This module contains the core model architecture classes used by the Trajectory DPF subsystem:
 - TrajectoryOutputAdapter: Output adapter for projecting decoder outputs to state dimensions
 - TrajectoryPerceiverIO: PerceiverIO backbone for trajectory generation (original, uses pip package)
 - ConditionedTrajectoryPerceiverIO: PerceiverIO with DiT-style AdaLN conditioning on torque
 """
 
-from dataclasses import dataclass
 from typing import Optional
 
 import torch
@@ -19,40 +18,6 @@ from perceiver.model.core import (
     PerceiverDecoder,
     PerceiverEncoder,
 )
-
-
-@dataclass
-class AblationConfig:
-    """Configuration for ablation studies on AdaLN-based causal conditioning.
-
-    All defaults produce the full model behavior (no ablation).
-    """
-    use_adaln: bool = True                  # False = no AdaLN (torque concat baseline)
-    use_per_step_cond: bool = True          # False = global cond (mean(c) for all positions)
-    use_shift_right: bool = True            # False = acausal (c instead of c_next)
-    use_state_interaction: bool = True      # False = torque-only conditioning
-    torque_in_tokens: bool = False          # True = concatenate torque to tokens
-
-    @classmethod
-    def global_cond(cls):
-        """Remove per-step modulation - use global conditioning for all positions."""
-        return cls(use_per_step_cond=False)
-
-    @classmethod
-    def no_shift_right(cls):
-        """Remove causal mechanism."""
-        return cls(use_shift_right=False)
-
-    @classmethod
-    def no_state_interaction(cls):
-        """Remove state-torque interaction."""
-        return cls(use_state_interaction=False)
-
-    @classmethod
-    def torque_concat(cls):
-        """Baseline: No AdaLN, torque in tokens."""
-        return cls(use_adaln=False, torque_in_tokens=True)
-
 
 class InputAdapter(PerceiverInputAdapter):
     """Pass-through input adapter that returns input unchanged."""
@@ -743,7 +708,6 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         num_heads: int = 8,
         dropout: float = 0.0,
         encoder_cond_mode: str = "mean",  # "per_step", "mean", "rnn", or "none"
-        ablation_config: AblationConfig = None,  # Ablation study configuration
     ):
         super().__init__()
         self.num_input_channels = num_input_channels
@@ -752,32 +716,17 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         self.torque_dim = torque_dim
         self.cond_dim = cond_dim
         self.encoder_cond_mode = encoder_cond_mode
-        self.ablation_config = ablation_config or AblationConfig()
-
-        cfg = self.ablation_config
-
-        # Conditioners: only create when AdaLN is enabled
-        if cfg.use_adaln:
-            self.torque_conditioner = TorqueConditioner(torque_dim, cond_dim)
-            # Learnable initial conditioning for c[0] (replaces zero-fill at t=0)
-            self.c0 = nn.Parameter(torch.zeros(1, 1, cond_dim))
-            if cfg.use_state_interaction:
-                self.state_conditioner = StateConditioner(state_dim, cond_dim)
-                self.interaction_mlp = InteractionMLP(cond_dim)
-            else:
-                self.state_conditioner = None
-                self.interaction_mlp = None
-        else:
-            self.torque_conditioner = None
-            self.c0 = None
-            self.state_conditioner = None
-            self.interaction_mlp = None
+        self.torque_conditioner = TorqueConditioner(torque_dim, cond_dim)
+        # Learnable initial conditioning for c[0] (replaces zero-fill at t=0)
+        self.c0 = nn.Parameter(torch.zeros(1, 1, cond_dim))
+        self.state_conditioner = StateConditioner(state_dim, cond_dim)
+        self.interaction_mlp = InteractionMLP(cond_dim)
 
         # Global conditioning projection (for encoder, if enabled)
-        if encoder_cond_mode in ("mean", "per_step") and cfg.use_adaln:
+        if encoder_cond_mode in ("mean", "per_step"):
             self.global_cond_proj = nn.Linear(cond_dim, cond_dim)
             self.cond_rnn = None
-        elif encoder_cond_mode == "rnn" and cfg.use_adaln:
+        elif encoder_cond_mode == "rnn":
             self.global_cond_proj = nn.Linear(cond_dim, cond_dim)
             self.cond_rnn = nn.GRU(cond_dim, cond_dim, batch_first=True)
         else:
@@ -794,37 +743,15 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
             num_self_attention_blocks=num_self_attention_blocks,
             num_heads=num_heads,
             dropout=dropout,
-            use_cross_attn_adaln=(encoder_cond_mode == "per_step" and cfg.use_adaln),
+            use_cross_attn_adaln=(encoder_cond_mode == "per_step"),
         )
 
-        # Decoder: use AdaLN-conditioned or standard cross-attention
-        if cfg.use_adaln:
-            self.decoder = ConditionedPerceiverDecoder(
-                num_query_channels=num_input_channels,
-                num_latent_channels=num_latent_channels,
-                num_output_channels=num_output_channels,
-                state_dim=state_dim,
-                cond_dim=cond_dim,
-                num_heads=num_heads,
-                dropout=dropout,
-                num_decoder_blocks=num_decoder_blocks,
-            )
-        else:
-            # torque_concat baseline: standard decoder without AdaLN
-            self.decoder = self._build_standard_decoder(
-                num_input_channels, num_latent_channels, num_output_channels,
-                num_heads, dropout, num_decoder_blocks,
-            )
-
-    def _build_standard_decoder(
-        self, num_query_channels, num_latent_channels, num_output_channels,
-        num_heads, dropout, num_decoder_blocks,
-    ):
-        """Build a decoder with StandardCrossAttentionBlock (no AdaLN)."""
-        return _StandardPerceiverDecoder(
-            num_query_channels=num_query_channels,
+        self.decoder = ConditionedPerceiverDecoder(
+            num_query_channels=num_input_channels,
             num_latent_channels=num_latent_channels,
             num_output_channels=num_output_channels,
+            state_dim=state_dim,
+            cond_dim=cond_dim,
             num_heads=num_heads,
             dropout=dropout,
             num_decoder_blocks=num_decoder_blocks,
@@ -843,12 +770,9 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         Returns:
             c: [B, L, cond_dim] - conditioning embeddings (before shift-right)
         """
-        cfg = self.ablation_config
-        if cfg.use_state_interaction:
-            x_est = tokens[:, :, :self.state_dim]
-            x_emb = self.state_conditioner(x_est)
-            return self.interaction_mlp(x_emb, torque_emb)
-        return torque_emb
+        x_est = tokens[:, :, :self.state_dim]
+        x_emb = self.state_conditioner(x_est)
+        return self.interaction_mlp(x_emb, torque_emb)
 
     def _shift_right(self, c: torch.Tensor) -> torch.Tensor:
         """Apply causal shift-right with learnable c0.
@@ -859,12 +783,10 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
             c_shifted: [B, L, cond_dim] - shifted conditioning (c_shifted[0] = c0, c_shifted[t] = c[t-1])
         """
         B = c.shape[0]
-        if self.ablation_config.use_shift_right:
-            c_shifted = torch.zeros_like(c)
-            c_shifted[:, 0:1, :] = self.c0.expand(B, -1, -1)
-            c_shifted[:, 1:, :] = c[:, :-1, :]
-            return c_shifted
-        return c
+        c_shifted = torch.zeros_like(c)
+        c_shifted[:, 0:1, :] = self.c0.expand(B, -1, -1)
+        c_shifted[:, 1:, :] = c[:, :-1, :]
+        return c_shifted
 
     def forward(
         self,
@@ -887,17 +809,8 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         """
         B, T, _ = queries.shape
         N_ctx = contexts.shape[1]
-        cfg = self.ablation_config
-
-        # ---- Ablation: torque_in_tokens (baseline) ----
-        if cfg.torque_in_tokens:
-            if torque is None:
-                raise ValueError("torque must be provided when torque_in_tokens=True")
-            queries = torch.cat([queries, torque], dim=-1)
-            contexts = torch.cat([contexts, torque[:, :N_ctx, :]], dim=-1)
-
-        # ---- Compute conditioning (only when AdaLN is active) ----
-        if cfg.use_adaln and torque is not None:
+        # Compute conditioning for the full model path.
+        if torque is not None:
             # Torque embedding for full query sequence
             u_emb = self.torque_conditioner(torque)  # [B, T, cond_dim]
 
@@ -906,7 +819,7 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
             c_shifted = self._shift_right(c)
 
             # Per-step vs global conditioning for decoder
-            if cfg.use_per_step_cond:
+            if self.encoder_cond_mode == "per_step":
                 c_next = c_shifted
             else:
                 c_next = c_shifted.mean(dim=1, keepdim=True).expand(-1, T, -1)
@@ -934,7 +847,7 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
                 global_cond = torch.zeros(B, 1, self.cond_dim, device=queries.device, dtype=queries.dtype)
 
         else:
-            # No AdaLN: zero conditioning (encoder/decoder blocks ignore it)
+            # No torque conditioning provided: fall back to zero conditioning.
             c_next = torch.zeros(B, T, self.cond_dim, device=queries.device, dtype=queries.dtype)
             global_cond = torch.zeros(B, 1, self.cond_dim, device=queries.device, dtype=queries.dtype)
             per_step_enc_cond = None
@@ -946,58 +859,3 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         predictions = self.decoder(latents, queries, c_next)
 
         return predictions
-
-
-class _StandardPerceiverDecoder(nn.Module):
-    """PerceiverIO decoder with standard (non-AdaLN) cross-attention.
-
-    Used by the ``torque_concat`` ablation where torque is in the tokens
-    and no AdaLN modulation is needed.  Accepts a ``cond`` argument in
-    ``forward`` for interface compatibility but ignores it.
-    """
-
-    def __init__(
-        self,
-        num_query_channels: int,
-        num_latent_channels: int,
-        num_output_channels: int,
-        num_heads: int = 8,
-        dropout: float = 0.0,
-        num_decoder_blocks: int = 0,
-    ):
-        super().__init__()
-
-        self.cross_attn = StandardCrossAttentionBlock(
-            query_dim=num_query_channels,
-            latent_dim=num_latent_channels,
-            num_heads=num_heads,
-            dropout=dropout,
-        )
-
-        # Self-attention blocks (standard, no conditioning)
-        self.self_attn_blocks = nn.ModuleList([
-            AdaLNSelfAttentionBlock(num_query_channels, 1, num_heads, dropout)
-            for _ in range(num_decoder_blocks)
-        ]) if num_decoder_blocks > 0 else nn.ModuleList()
-
-        self.output_norm = nn.LayerNorm(num_query_channels)
-        self.output_proj = nn.Linear(num_query_channels, num_output_channels)
-
-    def forward(
-        self,
-        latents: torch.Tensor,
-        queries: torch.Tensor,
-        cond: torch.Tensor = None,
-    ) -> torch.Tensor:
-        output = self.cross_attn(queries, latents)
-
-        for block in self.self_attn_blocks:
-            # Feed zeros as conditioning — these blocks ignore it effectively
-            # because cond_dim=1 and weights are zero-init
-            dummy_cond = torch.zeros(
-                queries.shape[0], 1, 1,
-                device=queries.device, dtype=queries.dtype,
-            )
-            output = block(output, dummy_cond)
-
-        return self.output_proj(self.output_norm(output))

@@ -7,7 +7,7 @@ This document specifies the standard-diffusion transformer backbone used for the
 ## Entry points
 
 - model class: `src/models/architectures.py` -> `TrajectoryTransformerDiffusion`
-- training CLI: `src/models/trajectory_dpf.py` -> `--backbone transformer`
+- training CLI: `src/models/train_trajectory_dpf.py` -> `--backbone transformer`
 - launcher: `scripts/train/train_transformer_diffusion_fixed_length.sh`
 
 ## Fixed-budget reproduction

@@ -38,14 +38,11 @@ project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "scripts"))
 
-from scripts.system_eval_utils import SYSTEM_CONFIGS
-from src.models.utils import reconstruct_traj_with_momentum
+from scripts.system_eval_utils import SYSTEM_CONFIGS, compute_rmse
 
 
 ALL_POLICIES = ("sinusoidal", "gp", "zero", "spline")
 MAX_LENGTH = 1000
-DT = 0.0002
-SIM_DT = 0.0001
 
 METHODS = [
     # Row-1 (legend): Unguided DPF, Guided DPF (One-step), Guided DPF (Resampling, m=4), HNN rollout
@@ -156,47 +153,6 @@ def _is_complete_policy_cache(df: pd.DataFrame) -> bool:
     return found == set(ALL_POLICIES)
 
 
-def _compute_rmse_qp(
-    state: torch.Tensor, tau: torch.Tensor, qpos_dim: int, mj_model: mujoco.MjModel
-) -> tuple[float, float]:
-    qpos = state[:, :qpos_dim].cpu().numpy()
-    mom = state[:, qpos_dim:].cpu().numpy()
-    tau_np = tau.cpu().numpy()
-    t_len = qpos.shape[0]
-
-    data = mujoco.MjData(mj_model)
-    data.qpos[:] = qpos[0]
-    data.qvel[:] = 0
-    mujoco.mj_forward(mj_model, data)
-
-    m_mat = np.zeros((mj_model.nv, mj_model.nv))
-    mujoco.mj_fullM(mj_model, m_mat, data.qM)
-    initial_qvel = np.linalg.solve(m_mat, mom[0])
-
-    recon = reconstruct_traj_with_momentum(
-        mj_model,
-        t_len,
-        SIM_DT,
-        qpos[0],
-        initial_qvel,
-        tau_np,
-        data_dt=DT,
-        trajectory_alignment="pre_step",
-    )
-    gt_qpos = recon["seq_qpos"]
-    gt_mom = recon["seq_mom"]
-
-    t_min = min(len(qpos), len(gt_qpos))
-    if t_min <= 0:
-        return float("nan"), float("nan")
-
-    e_q = qpos[:t_min] - gt_qpos[:t_min]
-    e_p = mom[:t_min] - gt_mom[:t_min]
-    rmse_q = np.sqrt((e_q ** 2).mean(axis=0))
-    rmse_p = np.sqrt((e_p ** 2).mean(axis=0))
-    return float(rmse_q.mean()), float(rmse_p.mean())
-
-
 def build_resampling_dpf_rmse(system: str, root_dir: Path) -> Path:
     out_csv = root_dir / "metrics" / "rmse_range_per_sample_Lle1000.csv"
     if out_csv.exists():
@@ -233,7 +189,7 @@ def build_resampling_dpf_rmse(system: str, root_dir: Path) -> Path:
         states = bundle["guided_states"]
         torques = bundle["guided_torques"]
         for sample_idx in range(states.shape[0]):
-            grq, grp = _compute_rmse_qp(states[sample_idx], torques[sample_idx], qpos_dim, mj_model)
+            grq, grp = compute_rmse(states[sample_idx], torques[sample_idx], mj_model, qpos_dim)
             rows.append(
                 {
                     "combo": combo,
@@ -284,8 +240,8 @@ def build_dpf_onestep_rmse(system: str, run_root: Path) -> Path:
         gui_torques = bundle["guided_torques"]
 
         for sample_idx in range(ung_states.shape[0]):
-            urq, urp = _compute_rmse_qp(ung_states[sample_idx], ung_torques[sample_idx], qpos_dim, mj_model)
-            grq, grp = _compute_rmse_qp(gui_states[sample_idx], gui_torques[sample_idx], qpos_dim, mj_model)
+            urq, urp = compute_rmse(ung_states[sample_idx], ung_torques[sample_idx], mj_model, qpos_dim)
+            grq, grp = compute_rmse(gui_states[sample_idx], gui_torques[sample_idx], mj_model, qpos_dim)
             rows.append(
                 {
                     "combo": combo,
