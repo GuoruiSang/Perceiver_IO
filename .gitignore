@@ -55,6 +55,11 @@ data/
 # Experiment outputs
 experiments/
 plots/
+output/**/smoke/
+output/**/_tmp*/
+output/**/*_smoke*/
+output/**/*_quick*/
+output/showcase_cache/
 
 # ===========================
 # IDE / Editors

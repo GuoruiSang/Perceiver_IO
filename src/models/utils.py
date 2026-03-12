@@ -12,6 +12,8 @@ import torch.nn.functional as F
 from perceiver.model.core import QueryProvider
 from einops import rearrange
 import pytorch_lightning as pl
+import matplotlib
+matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -40,12 +42,17 @@ class EMA:
 
     def update(self, model=None) -> None:
         """Update EMA shadow parameters after each training batch."""
+        _ = model  # Kept for backward-compatible call sites.
         for name, param in self.model.named_parameters():
             if param.requires_grad:
                 if name not in self.shadow:
                     self.shadow[name] = param.data.clone().detach()
                 else:
-                    new_average = (1.0 - self.decay) * param.data + self.decay * self.shadow[name]
+                    shadow = self.shadow[name]
+                    if shadow.device != param.data.device or shadow.dtype != param.data.dtype:
+                        shadow = shadow.to(device=param.data.device, dtype=param.data.dtype)
+                        self.shadow[name] = shadow
+                    new_average = (1.0 - self.decay) * param.data + self.decay * shadow
                     self.shadow[name] = new_average.clone().detach()
 
     def apply_shadow(self) -> None:
@@ -54,18 +61,25 @@ class EMA:
             if param.requires_grad:
                 if name not in self.backup:
                     self.backup[name] = param.data.clone().detach()
-                param.data = self.shadow[name].clone().detach()
+                shadow = self.shadow[name]
+                if shadow.device != param.data.device or shadow.dtype != param.data.dtype:
+                    shadow = shadow.to(device=param.data.device, dtype=param.data.dtype)
+                    self.shadow[name] = shadow
+                param.data = shadow.clone().detach()
 
     def store(self, model=None) -> None:
         """Alias for apply_shadow (kept for API compatibility)."""
+        _ = model  # Kept for backward-compatible call sites.
         self.apply_shadow()
 
     def copy_to(self, model=None) -> None:
         """Alias for apply_shadow (kept for API compatibility)."""
+        _ = model  # Kept for backward-compatible call sites.
         self.apply_shadow()
 
     def restore(self, model=None) -> None:
         """Restore original model weights after inference."""
+        _ = model  # Kept for backward-compatible call sites.
         for name, param in self.model.named_parameters():
             if param.requires_grad and name in self.backup:
                 param.data = self.backup[name].clone().detach()
@@ -536,16 +550,9 @@ def compute_qpos_qvel_qacc_consistency_energy(
         Returns:
             energy: [1,]
     """
-    # Central difference: f'(t) = (f(t+1) - f(t-1)) / (2*dt)
-    qpos_dot = torch.zeros_like(qvel)
-    qpos_dot[:, 1:-1] = (qpos[:, 2:] - qpos[:, :-2]) / (2 * dt)
-    qpos_dot[:, 0] = (-3*qpos[:, 0] + 4*qpos[:, 1] - qpos[:, 2]) / (2*dt)
-    qpos_dot[:, -1] = (3*qpos[:, -1] - 4*qpos[:, -2] + qpos[:, -3]) / (2*dt)
-
-    qvel_dot = torch.zeros_like(qacc)
-    qvel_dot[:, 1:-1] = (qvel[:, 2:] - qvel[:, :-2]) / (2 * dt)
-    qvel_dot[:, 0] = (-3*qvel[:, 0] + 4*qvel[:, 1] - qvel[:, 2]) / (2*dt)
-    qvel_dot[:, -1] = (3*qvel[:, -1] - 4*qvel[:, -2] + qvel[:, -3]) / (2*dt)
+    # Use shared central-difference helper to avoid duplicate formulas.
+    qpos_dot = central_difference(qpos, dt)
+    qvel_dot = central_difference(qvel, dt)
 
     e1 = nn.functional.mse_loss(qpos_dot, qvel)
     e2 = nn.functional.mse_loss(qvel_dot, qacc)
@@ -690,8 +697,9 @@ def compute_hnn_physics_energy(
     p_next = seq_mom[:, 1:]   # [B, T-1, mom_dim]
 
     # Compute HNN gradients (flatten for StructuredHNN compatibility)
-    p_flat = p_t.reshape(-1, p_t.shape[-1]).detach().clone().requires_grad_(True)
-    q_flat = q_t.reshape(-1, q_t.shape[-1]).detach().clone().requires_grad_(True)
+    # Detach from upstream graph; no clone needed for value-only guidance.
+    p_flat = p_t.reshape(-1, p_t.shape[-1]).detach().requires_grad_(True)
+    q_flat = q_t.reshape(-1, q_t.shape[-1]).detach().requires_grad_(True)
 
     H = hnn(p_flat, q_flat)  # [B*(T-1), 1]
 
@@ -724,6 +732,8 @@ def compute_hnn_robust_hamres_energy(
     delta: float = 1.0,
     min_scale_q: float = 1e-3,
     min_scale_p: float = 1e-3,
+    reduction: str = "mean",
+    create_graph: bool = True,
 ) -> torch.Tensor:
     """
     Robust HamRes-style differentiable energy for guidance.
@@ -747,10 +757,10 @@ def compute_hnn_robust_hamres_energy(
     tau_mid = seq_torque[:, 1:-1]
 
     # Same stop-grad convention as one-step guidance energy.
-    p_flat = p_mid.reshape(-1, p_mid.shape[-1]).detach().clone().requires_grad_(True)
-    q_flat = q_mid.reshape(-1, q_mid.shape[-1]).detach().clone().requires_grad_(True)
+    p_flat = p_mid.reshape(-1, p_mid.shape[-1]).detach().requires_grad_(True)
+    q_flat = q_mid.reshape(-1, q_mid.shape[-1]).detach().requires_grad_(True)
     H = hnn(p_flat, q_flat)
-    dH_dp, dH_dq = torch.autograd.grad(H.sum(), (p_flat, q_flat), create_graph=True)
+    dH_dp, dH_dq = torch.autograd.grad(H.sum(), (p_flat, q_flat), create_graph=create_graph)
     dH_dp = dH_dp.reshape(B, T - 2, -1)
     dH_dq = dH_dq.reshape(B, T - 2, -1)
 
@@ -772,9 +782,14 @@ def compute_hnn_robust_hamres_energy(
     r_q_norm = r_q / scale_q.view(1, 1, -1)
     r_p_norm = r_p / scale_p.view(1, 1, -1)
 
-    # Mean over dimensions then time then batch for smoother optimization.
+    # Mean over dimensions then time; keep per-batch values for particle sampling strategy.
     per_t = _pseudo_huber(r_q_norm, delta).mean(dim=-1) + _pseudo_huber(r_p_norm, delta).mean(dim=-1)
-    return per_t.mean()
+    per_sample = per_t.mean(dim=1)
+    if reduction == "none_batch":
+        return per_sample
+    if reduction == "mean":
+        return per_sample.mean()
+    raise ValueError(f"Unknown reduction: {reduction}")
 
 
 def compute_hnn_guidance_energy(
@@ -809,97 +824,82 @@ def compute_hnn_guidance_energy(
     raise ValueError(f"Unknown guidance energy mode: {mode}")
 
 
-from tqdm import trange
+def _add_trust_regularizer(
+    energy: torch.Tensor,
+    seq_qpos: torch.Tensor,
+    seq_mom: torch.Tensor,
+    q_ref: torch.Tensor,
+    p_ref: torch.Tensor,
+    trust_lambda: float,
+) -> torch.Tensor:
+    if trust_lambda <= 0:
+        return energy
+    return energy + trust_lambda * (((seq_qpos - q_ref) ** 2).mean() + ((seq_mom - p_ref) ** 2).mean())
 
 
-def run_normalized_sgd_hnn(
+def run_one_step_guidance_hnn(
     x: torch.Tensor,
     seq_torque: torch.Tensor,
     qpos_dim: int,
     mom_dim: int,
     dt: float,
     hnn: nn.Module,
-    num_steps: int,
     alpha_q: float = 1e-4,
     alpha_p: float = 1e-4,
-    guidance_energy_mode: str = "one_step",
-    guidance_hamres_smooth_sigma: float = 1.0,
-    guidance_hamres_delta: float = 1.0,
-    guidance_hamres_min_scale_q: float = 1e-3,
-    guidance_hamres_min_scale_p: float = 1e-3,
     guidance_trust_lambda: float = 0.0,
+    guidance_normalize_grad: bool = True,
+    guidance_joint_update: bool = False,
 ) -> torch.Tensor:
     """
-    Refine trajectory using normalized SGD with separate step sizes for q and p.
-
-    Each step:
-        q ← q - α_q * ∇_q E / |∇_q E|
-        p ← p - α_p * ∇_p E / |∇_p E|
-
-    Args:
-        x: State tensor [B, T, qpos_dim + mom_dim]
-        seq_torque: Torque conditioning [B, T, torque_dim]
-        qpos_dim: Dimension of position
-        mom_dim: Dimension of momentum
-        dt: Timestep between trajectory points
-        hnn: Trained Hamiltonian Neural Network
-        num_steps: Number of optimization steps
-        alpha_q: Step size for position update
-        alpha_p: Step size for momentum update
-
-    Returns:
-        Refined state tensor [B, T, qpos_dim + mom_dim]
+    Strategy 2:
+    Apply one normalized gradient step (one-step energy) to the current trajectory.
     """
     seq_qpos = x[:, :, :qpos_dim].clone().requires_grad_(True)
     seq_mom = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().requires_grad_(True)
-    q_ref = x[:, :, :qpos_dim].clone().detach()
-    p_ref = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().detach()
+    q_ref = x[:, :, :qpos_dim].detach()
+    p_ref = x[:, :, qpos_dim:qpos_dim + mom_dim].detach()
 
-    for i in trange(num_steps, desc='Running Normalized SGD'):
-        energy = compute_hnn_guidance_energy(
-            seq_qpos,
-            seq_mom,
-            seq_torque,
-            hnn,
-            dt,
-            mode=guidance_energy_mode,
-            hamres_smooth_sigma=guidance_hamres_smooth_sigma,
-            hamres_delta=guidance_hamres_delta,
-            hamres_min_scale_q=guidance_hamres_min_scale_q,
-            hamres_min_scale_p=guidance_hamres_min_scale_p,
-        )
-        if guidance_trust_lambda > 0:
-            energy = energy + guidance_trust_lambda * (
-                ((seq_qpos - q_ref) ** 2).mean() + ((seq_mom - p_ref) ** 2).mean()
-            )
+    energy = compute_hnn_physics_energy(seq_qpos, seq_mom, seq_torque, hnn, dt, use_forward_diff=False)
+    energy = _add_trust_regularizer(energy, seq_qpos, seq_mom, q_ref, p_ref, guidance_trust_lambda)
+    grad_q, grad_p = torch.autograd.grad(energy, [seq_qpos, seq_mom])
 
-        if i == 0 or i == num_steps - 1:
-            print(f'  HNN Energy: {energy.item():.6f}')
+    eps = 1e-12
+    if guidance_joint_update:
+        # Joint update: share one per-sample scale across q and p.
+        if guidance_normalize_grad:
+            grad_joint = torch.cat([grad_q, grad_p], dim=-1)
+            norm_joint = grad_joint.flatten(1).norm(dim=1, keepdim=True).view(-1, 1, 1).clamp_min(eps)
+            grad_q_use = grad_q / norm_joint
+            grad_p_use = grad_p / norm_joint
+        else:
+            grad_q_use = grad_q
+            grad_p_use = grad_p
+    else:
+        # Separate update: q and p each use their own scale.
+        if guidance_normalize_grad:
+            norm_q = grad_q.flatten(1).norm(dim=1, keepdim=True).view(-1, 1, 1).clamp_min(eps)
+            norm_p = grad_p.flatten(1).norm(dim=1, keepdim=True).view(-1, 1, 1).clamp_min(eps)
+            grad_q_use = grad_q / norm_q
+            grad_p_use = grad_p / norm_p
+        else:
+            grad_q_use = grad_q
+            grad_p_use = grad_p
 
-        grad_q, grad_p = torch.autograd.grad(energy, [seq_qpos, seq_mom])
-
-        # Normalize each gradient by its own L2 norm (+ eps for safety)
-        norm_q = grad_q.norm() + 1e-12
-        norm_p = grad_p.norm() + 1e-12
-
-        seq_qpos = (seq_qpos - alpha_q * grad_q / norm_q).detach().requires_grad_(True)
-        seq_mom = (seq_mom - alpha_p * grad_p / norm_p).detach().requires_grad_(True)
-
-    return torch.cat([seq_qpos, seq_mom], dim=-1)
+    q_new = seq_qpos - alpha_q * grad_q_use
+    p_new = seq_mom - alpha_p * grad_p_use
+    return torch.cat([q_new.detach(), p_new.detach()], dim=-1)
 
 
-def run_langevin_dynamics_hnn(
+def run_residual_sigmoid_sampling_hnn(
     x: torch.Tensor,
     seq_torque: torch.Tensor,
     qpos_dim: int,
     mom_dim: int,
     dt: float,
     hnn: nn.Module,
-    num_steps: int,
-    step_size: float,
-    noise_scale: float,
-    optimize_target: str = "both",
-    guidance_energy_mode: str = "one_step",
+    num_candidates: int = 16,
+    alpha_q: float = 1e-4,
+    alpha_p: float = 1e-4,
     guidance_hamres_smooth_sigma: float = 1.0,
     guidance_hamres_delta: float = 1.0,
     guidance_hamres_min_scale_q: float = 1e-3,
@@ -907,204 +907,108 @@ def run_langevin_dynamics_hnn(
     guidance_trust_lambda: float = 0.0,
 ) -> torch.Tensor:
     """
-    Refine trajectory using Langevin dynamics with HNN physics energy.
+    Deprecated helper kept for compatibility.
 
-    Args:
-        x: State tensor [B, T, qpos_dim + mom_dim] with structure [qpos | mom]
-        seq_torque: Torque conditioning [B, T, torque_dim] (fixed, not optimized)
-        qpos_dim: Dimension of position
-        mom_dim: Dimension of momentum
-        dt: Timestep for finite differences
-        hnn: Trained Hamiltonian Neural Network
-        num_steps: Number of Langevin steps
-        step_size: Step size for gradient descent
-        noise_scale: Scale of injected noise
-        optimize_target: 'both', 'q', 'p', or 'alternating'
-
-    Returns:
-        Refined state tensor [B, T, qpos_dim + mom_dim]
+    NOTE:
+    The active Strategy-1 path is implemented in TrajectoryDPF.sample_trajectories
+    (candidate generation from x_t -> x_{t-1}, then x0 scoring). This helper is
+    not used by the current sampling pipeline.
     """
-    seq_qpos = x[:, :, :qpos_dim].clone().requires_grad_(True)
-    seq_mom = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().requires_grad_(True)
-    q_ref = x[:, :, :qpos_dim].clone().detach()
-    p_ref = x[:, :, qpos_dim:qpos_dim + mom_dim].clone().detach()
+    if num_candidates < 2:
+        return x.detach()
 
-    half = num_steps // 2
+    seq_qpos = x[:, :, :qpos_dim].detach()
+    seq_mom = x[:, :, qpos_dim:qpos_dim + mom_dim].detach()
+    q_ref = seq_qpos
+    p_ref = seq_mom
 
-    for i in trange(num_steps, desc='Running Langevin Dynamics'):
-        energy = compute_hnn_guidance_energy(
-            seq_qpos,
-            seq_mom,
-            seq_torque,
-            hnn,
-            dt,
-            mode=guidance_energy_mode,
-            hamres_smooth_sigma=guidance_hamres_smooth_sigma,
-            hamres_delta=guidance_hamres_delta,
-            hamres_min_scale_q=guidance_hamres_min_scale_q,
-            hamres_min_scale_p=guidance_hamres_min_scale_p,
-        )
-        if guidance_trust_lambda > 0:
-            energy = energy + guidance_trust_lambda * (
-                ((seq_qpos - q_ref) ** 2).mean() + ((seq_mom - p_ref) ** 2).mean()
-            )
+    eps = 1e-12
+    bsz, tlen, _ = x.shape
+    # Candidate perturbation scales in [0.25, 2.0], sampled independently per sample/candidate.
+    scales_q = 0.25 + 1.75 * torch.rand(bsz, num_candidates, 1, 1, device=x.device, dtype=x.dtype)
+    scales_p = 0.25 + 1.75 * torch.rand(bsz, num_candidates, 1, 1, device=x.device, dtype=x.dtype)
+    noise_q = torch.randn(bsz, num_candidates, tlen, qpos_dim, device=x.device, dtype=x.dtype)
+    noise_p = torch.randn(bsz, num_candidates, tlen, mom_dim, device=x.device, dtype=x.dtype)
+    q_cands = seq_qpos.unsqueeze(1) + scales_q * alpha_q * noise_q
+    p_cands = seq_mom.unsqueeze(1) + scales_p * alpha_p * noise_p
 
-        if i == 0 or i == num_steps - 1:
-            print(f'HNN Energy: {energy.item():.6f}')
-        grad_qpos, grad_mom = torch.autograd.grad(energy, [seq_qpos, seq_mom])
+    # Keep candidate-0 as the unperturbed x0 so strategy1 can choose "no-op" when best.
+    q_cands[:, 0] = seq_qpos
+    p_cands[:, 0] = seq_mom
 
-        noise_std = (2 * step_size * noise_scale) ** 0.5
+    q_flat = q_cands.reshape(bsz * num_candidates, tlen, qpos_dim)
+    p_flat = p_cands.reshape(bsz * num_candidates, tlen, mom_dim)
+    tau_flat = seq_torque.unsqueeze(1).expand(-1, num_candidates, -1, -1).reshape(bsz * num_candidates, tlen, -1)
+    residual = compute_hnn_robust_hamres_energy(
+        q_flat,
+        p_flat,
+        tau_flat,
+        hnn,
+        dt,
+        smooth_sigma=guidance_hamres_smooth_sigma,
+        delta=guidance_hamres_delta,
+        min_scale_q=guidance_hamres_min_scale_q,
+        min_scale_p=guidance_hamres_min_scale_p,
+        reduction="none_batch",
+        create_graph=False,
+    ).reshape(bsz, num_candidates)
 
-        if optimize_target == 'alternating':
-            update_q = (i < half)
-            update_p = (i >= half)
-        else:
-            update_q = optimize_target in ('both', 'q')
-            update_p = optimize_target in ('both', 'p')
+    if guidance_trust_lambda > 0:
+        trust = ((q_cands - q_ref.unsqueeze(1)) ** 2).mean(dim=(2, 3))
+        trust = trust + ((p_cands - p_ref.unsqueeze(1)) ** 2).mean(dim=(2, 3))
+        residual = residual + guidance_trust_lambda * trust
 
-        if update_q:
-            seq_qpos = seq_qpos - step_size * grad_qpos + noise_std * torch.randn_like(seq_qpos)
-        if update_p:
-            seq_mom = seq_mom - step_size * grad_mom + noise_std * torch.randn_like(seq_mom)
+    # Normalize residuals per sample -> sigmoid weights (lower residual gets higher probability).
+    mean_r = residual.mean(dim=1, keepdim=True)
+    std_r = residual.std(dim=1, keepdim=True, unbiased=False).clamp_min(eps)
+    z = (residual - mean_r) / std_r
+    w = torch.sigmoid(-z)
+    probs = w / w.sum(dim=1, keepdim=True).clamp_min(eps)
+    chosen = torch.multinomial(probs, num_samples=1).squeeze(1)
+    bidx = torch.arange(bsz, device=x.device)
+    q_new = q_cands[bidx, chosen]
+    p_new = p_cands[bidx, chosen]
+    return torch.cat([q_new, p_new], dim=-1).detach()
 
-        seq_qpos = seq_qpos.detach().requires_grad_(True)
-        seq_mom = seq_mom.detach().requires_grad_(True)
+def _align_generated_and_reconstructed(
+    generated: dict[str, np.ndarray],
+    reconstructed: dict[str, np.ndarray],
+    alignment: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    if alignment == 'pre_step':
+        gen_qpos = generated['seq_qpos']
+        gen_mom = generated['seq_mom']
+        gen_tau = generated['seq_torque']
+        recon_qpos = reconstructed['seq_qpos']
+        recon_mom = reconstructed['seq_mom']
+        recon_tau = reconstructed['seq_torque']
+    elif alignment == 'post_step':
+        gen_qpos = generated['seq_qpos'][1:]
+        gen_mom = generated['seq_mom'][1:]
+        gen_tau = generated['seq_torque'][1:]
+        recon_qpos = reconstructed['seq_qpos']
+        recon_mom = reconstructed['seq_mom']
+        recon_tau = reconstructed['seq_torque']
+    else:
+        raise ValueError(f"Unknown trajectory alignment: {alignment}")
 
-    new_x = torch.cat([seq_qpos, seq_mom], dim=-1)
-    return new_x
+    t_min = min(
+        len(gen_qpos), len(gen_mom), len(gen_tau),
+        len(recon_qpos), len(recon_mom), len(recon_tau),
+    )
+    return (
+        gen_qpos[:t_min],
+        gen_mom[:t_min],
+        gen_tau[:t_min],
+        recon_qpos[:t_min],
+        recon_mom[:t_min],
+        recon_tau[:t_min],
+    )
 
-
-def run_adam_optimization_hnn(
-    x: torch.Tensor,
-    seq_torque: torch.Tensor,
-    qpos_dim: int,
-    mom_dim: int,
-    dt: float,
-    hnn: nn.Module,
-    num_steps: int,
-    lr: float = 1e-3,
-    use_forward_diff: bool = False,
-    optimize_target: str = "both",
-    guidance_energy_mode: str = "one_step",
-    guidance_hamres_smooth_sigma: float = 1.0,
-    guidance_hamres_delta: float = 1.0,
-    guidance_hamres_min_scale_q: float = 1e-3,
-    guidance_hamres_min_scale_p: float = 1e-3,
-    guidance_trust_lambda: float = 0.0,
-) -> torch.Tensor:
-    """
-    Optimize trajectory using Adam with HNN physics consistency energy.
-
-    Args:
-        x: State tensor [B, T, qpos_dim + mom_dim] with structure [qpos | mom]
-        seq_torque: Torque conditioning [B, T, torque_dim] (fixed, not optimized)
-        qpos_dim: Dimension of position
-        mom_dim: Dimension of momentum
-        dt: Timestep for finite differences
-        hnn: Trained Hamiltonian Neural Network
-        num_steps: Number of optimization steps
-        lr: Learning rate for Adam optimizer
-        use_forward_diff: if True, use forward difference; else use central difference
-        optimize_target: 'both', 'q' (position only), or 'p' (momentum only)
-
-    Returns:
-        Optimized state tensor [B, T, qpos_dim + mom_dim]
-    """
-    B = x.shape[0]
-    results = []
-
-    for b in trange(B, desc='Running Adam Optimization (per-sample)'):
-        xb = x[b:b+1]          # [1, T, state_dim]
-        tb = seq_torque[b:b+1]  # [1, T, torque_dim]
-        q_ref = xb[:, :, :qpos_dim].clone().detach()
-        p_ref = xb[:, :, qpos_dim:qpos_dim + mom_dim].clone().detach()
-
-        if optimize_target == 'alternating':
-            # Phase 1: optimize q only
-            qb = nn.Parameter(xb[:, :, :qpos_dim].clone())
-            pb = xb[:, :, qpos_dim:qpos_dim + mom_dim].clone()
-            opt_q = torch.optim.Adam([qb], lr=lr)
-            half = num_steps // 2
-            for i in range(half):
-                opt_q.zero_grad()
-                energy = compute_hnn_guidance_energy(
-                    qb, pb, tb, hnn, dt,
-                    mode=guidance_energy_mode,
-                    use_forward_diff=use_forward_diff,
-                    hamres_smooth_sigma=guidance_hamres_smooth_sigma,
-                    hamres_delta=guidance_hamres_delta,
-                    hamres_min_scale_q=guidance_hamres_min_scale_q,
-                    hamres_min_scale_p=guidance_hamres_min_scale_p,
-                )
-                if guidance_trust_lambda > 0:
-                    energy = energy + guidance_trust_lambda * ((qb - q_ref) ** 2).mean()
-                if b == 0 and (i == 0 or i == half - 1):
-                    print(f'  sample 0 Phase1(q) Energy: {energy.item():.6f}')
-                energy.backward()
-                opt_q.step()
-            # Phase 2: optimize p only, freeze q
-            qb_frozen = qb.data.clone()
-            pb = nn.Parameter(pb.clone())
-            opt_p = torch.optim.Adam([pb], lr=lr)
-            for i in range(num_steps - half):
-                opt_p.zero_grad()
-                energy = compute_hnn_guidance_energy(
-                    qb_frozen, pb, tb, hnn, dt,
-                    mode=guidance_energy_mode,
-                    use_forward_diff=use_forward_diff,
-                    hamres_smooth_sigma=guidance_hamres_smooth_sigma,
-                    hamres_delta=guidance_hamres_delta,
-                    hamres_min_scale_q=guidance_hamres_min_scale_q,
-                    hamres_min_scale_p=guidance_hamres_min_scale_p,
-                )
-                if guidance_trust_lambda > 0:
-                    energy = energy + guidance_trust_lambda * ((pb - p_ref) ** 2).mean()
-                if b == 0 and (i == 0 or i == num_steps - half - 1):
-                    print(f'  sample 0 Phase2(p) Energy: {energy.item():.6f}')
-                energy.backward()
-                opt_p.step()
-            qb = qb_frozen
-        elif optimize_target == 'q':
-            qb = nn.Parameter(xb[:, :, :qpos_dim].clone())
-            pb = xb[:, :, qpos_dim:qpos_dim + mom_dim].clone()
-            params = [qb]
-        elif optimize_target == 'p':
-            qb = xb[:, :, :qpos_dim].clone()
-            pb = nn.Parameter(xb[:, :, qpos_dim:qpos_dim + mom_dim].clone())
-            params = [pb]
-        else:
-            qb = nn.Parameter(xb[:, :, :qpos_dim].clone())
-            pb = nn.Parameter(xb[:, :, qpos_dim:qpos_dim + mom_dim].clone())
-            params = [qb, pb]
-
-        if optimize_target != 'alternating':
-            optimizer = torch.optim.Adam(params, lr=lr)
-            for i in range(num_steps):
-                optimizer.zero_grad()
-                energy = compute_hnn_guidance_energy(
-                    qb, pb, tb, hnn, dt,
-                    mode=guidance_energy_mode,
-                    use_forward_diff=use_forward_diff,
-                    hamres_smooth_sigma=guidance_hamres_smooth_sigma,
-                    hamres_delta=guidance_hamres_delta,
-                    hamres_min_scale_q=guidance_hamres_min_scale_q,
-                    hamres_min_scale_p=guidance_hamres_min_scale_p,
-                )
-                if guidance_trust_lambda > 0:
-                    energy = energy + guidance_trust_lambda * (
-                        ((qb - q_ref) ** 2).mean() + ((pb - p_ref) ** 2).mean()
-                    )
-                if b == 0 and (i == 0 or i == num_steps - 1):
-                    print(f'  sample 0 HNN Energy: {energy.item():.6f}')
-                energy.backward()
-                optimizer.step()
-
-        results.append(torch.cat([qb.data, pb.data], dim=-1))
-
-    return torch.cat(results, dim=0)
 
 def compare_generated_with_reconstructed(
-    generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, data_dt: float = None, name: str = None
+    generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, data_dt: float = None,
+    name: str = None, trajectory_alignment: str = 'pre_step', return_series: bool = False
 ) -> dict:
     """
     Compare generated trajectory with physics-reconstructed trajectory.
@@ -1119,9 +1023,11 @@ def compare_generated_with_reconstructed(
         dt: Fine simulation timestep
         data_dt: Data collection timestep (default: dt for backwards compatibility)
         name: Name for the output file (if None, skip plotting)
+        trajectory_alignment: 'pre_step' for synchronized datasets, 'post_step' for legacy datasets
     
     Returns:
         dict with MSE values: {'mse_qpos': float, 'mse_mom': float, 'mse_total': float}
+        If return_series=True, also returns aligned generated/reconstructed arrays.
     """
     import mujoco
     
@@ -1129,37 +1035,62 @@ def compare_generated_with_reconstructed(
     if data_dt is None:
         data_dt = dt
     
+    print(f"[Compare] Starting compare_generated_with_reconstructed(name={name}, alignment={trajectory_alignment})")
+
     # Convert to numpy if needed
     gen = {k: (v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v) for k, v in generated.items()}
     
     # Load MuJoCo model
+    print(f"[Compare] Loading MuJoCo model from {mujoco_model_path}")
     model = mujoco.MjModel.from_xml_path(mujoco_model_path)
     data = mujoco.MjData(model)
     
+    qpos_dim = int(gen['seq_qpos'].shape[-1])
+    mom_dim = int(gen['seq_mom'].shape[-1])
+
     # Compute initial velocity from initial momentum: v = M^{-1} @ p
-    data.qpos[:] = gen['seq_qpos'][0]
+    print("[Compare] Computing initial velocity from momentum")
+    data.qpos[:] = 0.0
+    data.qpos[:qpos_dim] = gen['seq_qpos'][0]
     data.qvel[:] = 0  # Temporary
     mujoco.mj_forward(model, data)
     
     M = np.zeros((model.nv, model.nv))
     mujoco.mj_fullM(model, M, data.qM)
-    initial_qvel = np.linalg.solve(M, gen['seq_mom'][0])
+    initial_qvel = np.zeros(model.nv, dtype=np.float64)
+    initial_qvel[:mom_dim] = np.linalg.solve(M[:mom_dim, :mom_dim], gen['seq_mom'][0])
     
     # Reconstruct using MuJoCo physics (with data_dt support)
+    print(f"[Compare] Reconstructing trajectory for {len(gen['seq_qpos'])} steps")
     recon = reconstruct_traj_with_momentum(
         model, len(gen['seq_qpos']), dt,
         gen['seq_qpos'][0], initial_qvel, gen['seq_torque'],
         data_dt=data_dt
     )
+    print("[Compare] Reconstruction finished")
     
-    # Compute MSE between generated and reconstructed trajectories
-    # Align: generated[1:] vs reconstructed (both have length T-1)
-    mse_qpos = np.mean((gen['seq_qpos'][1:] - recon['seq_qpos']) ** 2)
-    mse_mom = np.mean((gen['seq_mom'][1:] - recon['seq_mom']) ** 2)
+    recon_qpos = recon['seq_qpos'][..., :qpos_dim]
+    recon_mom = recon['seq_mom'][..., :mom_dim]
+    gen_qpos, gen_mom, gen_tau, recon_qpos, recon_mom, recon_tau = _align_generated_and_reconstructed(
+        {
+            'seq_qpos': gen['seq_qpos'],
+            'seq_mom': gen['seq_mom'],
+            'seq_torque': gen['seq_torque'],
+        },
+        {
+            'seq_qpos': recon_qpos,
+            'seq_mom': recon_mom,
+            'seq_torque': recon['seq_torque'],
+        },
+        trajectory_alignment,
+    )
+    mse_qpos = np.mean((gen_qpos - recon_qpos) ** 2)
+    mse_mom = np.mean((gen_mom - recon_mom) ** 2)
     mse_total = mse_qpos + mse_mom
     
     # Only create plot if name is provided
     if name is not None:
+        print("[Compare] Building matplotlib figure")
         keys = ['seq_qpos', 'seq_mom', 'seq_torque']
         nrows, ncols = len(keys), max(v.shape[-1] for v in gen.values())
         fig, axes = plt.subplots(nrows, ncols, figsize=(30, 10))
@@ -1168,7 +1099,15 @@ def compare_generated_with_reconstructed(
         fig.suptitle(f'MSE: qpos={mse_qpos:.6f}, mom={mse_mom:.6f}, total={mse_total:.6f}', fontsize=14, y=1.02)
         
         for i, key in enumerate(keys):
-            gen_data, recon_data = gen[key][1:], recon[key]  # Align: generated[1:] vs reconstructed
+            if key == 'seq_qpos':
+                gen_data = gen_qpos
+                recon_data = recon_qpos
+            elif key == 'seq_mom':
+                gen_data = gen_mom
+                recon_data = recon_mom
+            else:
+                gen_data = gen_tau
+                recon_data = recon_tau
             t = np.arange(len(gen_data))
             for j in range(gen_data.shape[-1]):
                 if j < ncols:
@@ -1180,13 +1119,147 @@ def compare_generated_with_reconstructed(
                 axes[i, j].set_visible(False)
         
         fig.tight_layout()
-        fig.savefig(os.path.join(save_path, f'{name}.jpg'), bbox_inches='tight')
+        out_path = os.path.join(save_path, f'{name}.jpg')
+        print(f"[Compare] Saving figure to {out_path}")
+        fig.savefig(out_path, bbox_inches='tight')
         plt.close(fig)
+        print("[Compare] Figure saved and closed")
     
-    return {'mse_qpos': mse_qpos, 'mse_mom': mse_mom, 'mse_total': mse_total}
+    print(f"[Compare] Done: mse_qpos={mse_qpos:.6f}, mse_mom={mse_mom:.6f}, mse_total={mse_total:.6f}")
+    out = {'mse_qpos': mse_qpos, 'mse_mom': mse_mom, 'mse_total': mse_total}
+    if return_series:
+        out.update(
+            {
+                'generated_qpos': gen_qpos,
+                'generated_mom': gen_mom,
+                'generated_torque': gen_tau,
+                'reconstructed_qpos': recon_qpos,
+                'reconstructed_mom': recon_mom,
+                'reconstructed_torque': recon_tau,
+            }
+        )
+    return out
 
 
-def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array, data_dt: float = None):
+def compare_multiple_generated_with_reconstructed(
+    generated_list: list[dict],
+    mujoco_model_path: str,
+    save_path: str,
+    dt: float = 0.0005,
+    data_dt: float = None,
+    name: str = None,
+    trajectory_alignment: str = 'pre_step',
+    prefix_len: int = 0,
+) -> dict:
+    """
+    Overlay multiple sampled branches from the same history prefix in the same
+    callback-style comparison plot.
+
+    The plot uses the same grid format as compare_generated_with_reconstructed:
+    blue = generated branches, red = MuJoCo reconstructions, black = shared prefix.
+    """
+    if len(generated_list) == 0:
+        raise ValueError("generated_list must contain at least one trajectory")
+
+    series_rows = [
+        compare_generated_with_reconstructed(
+            generated=generated,
+            mujoco_model_path=mujoco_model_path,
+            save_path=save_path,
+            dt=dt,
+            data_dt=data_dt,
+            name=None,
+            trajectory_alignment=trajectory_alignment,
+            return_series=True,
+        )
+        for generated in generated_list
+    ]
+
+    nrows, ncols = 3, max(v.shape[-1] for v in generated_list[0].values())
+    fig, axes = plt.subplots(nrows, ncols, figsize=(30, 10))
+    mean_mse_q = float(np.mean([row['mse_qpos'] for row in series_rows]))
+    mean_mse_p = float(np.mean([row['mse_mom'] for row in series_rows]))
+    mean_mse_total = float(np.mean([row['mse_total'] for row in series_rows]))
+    fig.suptitle(
+        f'Branches={len(series_rows)} mean MSE: qpos={mean_mse_q:.6f}, mom={mean_mse_p:.6f}, total={mean_mse_total:.6f}',
+        fontsize=14,
+        y=1.02,
+    )
+
+    keys = [
+        ('seq_qpos', 'generated_qpos', 'reconstructed_qpos'),
+        ('seq_mom', 'generated_mom', 'reconstructed_mom'),
+        ('seq_torque', 'generated_torque', 'reconstructed_torque'),
+    ]
+    prefix_len = max(0, int(prefix_len))
+
+    for row_idx, (title, gen_key, recon_key) in enumerate(keys):
+        branch_dim = series_rows[0][gen_key].shape[-1]
+        for dim in range(ncols):
+            ax = axes[row_idx, dim]
+            if dim >= branch_dim:
+                ax.set_visible(False)
+                continue
+
+            prefix_plotted = False
+            gen_plotted = False
+            recon_plotted = False
+            for branch in series_rows:
+                gen_arr = branch[gen_key]
+                recon_arr = branch[recon_key]
+                t = np.arange(len(gen_arr))
+                prefix_end = min(prefix_len, len(gen_arr))
+                if prefix_end > 0 and not prefix_plotted:
+                    ax.scatter(
+                        t[:prefix_end],
+                        gen_arr[:prefix_end, dim],
+                        s=2,
+                        c='black',
+                        alpha=0.9,
+                        label='Prefix',
+                    )
+                    prefix_plotted = True
+                ax.scatter(
+                    t[prefix_end:],
+                    gen_arr[prefix_end:, dim],
+                    s=2,
+                    c='blue',
+                    alpha=0.18,
+                    label='Generated branches' if not gen_plotted else None,
+                )
+                gen_plotted = True
+                ax.scatter(
+                    t[prefix_end:],
+                    recon_arr[prefix_end:, dim],
+                    s=2,
+                    c='red',
+                    alpha=0.18,
+                    label='Reconstructed branches' if not recon_plotted else None,
+                )
+                recon_plotted = True
+            if prefix_len > 0:
+                ax.axvline(prefix_len - 1, color='gray', linestyle=':', linewidth=1.0)
+            ax.set_title(f'{title}[{dim}]')
+            ax.legend(markerscale=5)
+
+    fig.tight_layout()
+    out_path = os.path.join(save_path, f'{name}.jpg')
+    print(f"[Compare] Saving multi-branch figure to {out_path}")
+    fig.savefig(out_path, bbox_inches='tight')
+    plt.close(fig)
+
+    return {
+        'mse_qpos': mean_mse_q,
+        'mse_mom': mean_mse_p,
+        'mse_total': mean_mse_total,
+        'num_branches': int(len(series_rows)),
+    }
+
+
+def reconstruct_traj_using_torque(
+    model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array,
+    data_dt: float = None, trajectory_alignment: str = 'pre_step'
+):
     """
     Legacy reconstruction function returning (qpos, qvel, qacc, torque).
     
@@ -1200,6 +1273,7 @@ def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos
         initial_qvel: Initial velocity
         seq_torque: Torque sequence at data_dt resolution (num_steps, torque_dim)
         data_dt: Data collection timestep (default: dt for backwards compatibility)
+        trajectory_alignment: 'pre_step' for synchronized trajectories, 'post_step' for legacy reconstruction
     
     Returns:
         dict with 'seq_qpos', 'seq_qvel', 'seq_qacc', 'seq_torque' at data_dt resolution
@@ -1217,35 +1291,49 @@ def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos
 
     data = mujoco.MjData(model)
 
-    data.qpos[:] = initial_qpos
-    data.qvel[:] = initial_qvel
+    qpos_dim = int(initial_qpos.shape[-1])
+    qvel_dim = int(initial_qvel.shape[-1])
+    data.qpos[:] = 0.0
+    data.qvel[:] = 0.0
+    data.qpos[:qpos_dim] = initial_qpos
+    data.qvel[:qvel_dim] = initial_qvel
+    mujoco.mj_forward(model, data)
 
     seq_qpos = []
     seq_qvel = []
     seq_qacc = []
     
-    num_sim_steps = (num_steps - 1) * skip_steps
+    num_sim_steps = max(num_steps - 1, 0) * skip_steps
 
-    # Run simulation at fine timestep, collect at coarse intervals
-    for i in range(num_sim_steps):
-        # Apply torque: each torque in seq_torque is held for skip_steps iterations
-        torque_idx = i // skip_steps
-        data.ctrl[:] = seq_torque[torque_idx]
-        
-        mujoco.mj_step(model, data)
-
-        # Collect data at data_dt intervals (every skip_steps simulation steps)
-        if (i + 1) % skip_steps == 0:
+    if trajectory_alignment == 'pre_step':
+        for data_idx in range(num_steps):
             seq_qpos.append(data.qpos.copy())
             seq_qvel.append(data.qvel.copy())
             seq_qacc.append(data.qacc.copy())
+            if data_idx == num_steps - 1:
+                break
+            tau_t = seq_torque[data_idx]
+            for _ in range(skip_steps):
+                data.ctrl[:] = tau_t
+                mujoco.mj_step(model, data)
+    elif trajectory_alignment == 'post_step':
+        for i in range(num_sim_steps):
+            torque_idx = i // skip_steps
+            data.ctrl[:] = seq_torque[torque_idx]
+            mujoco.mj_step(model, data)
+            if (i + 1) % skip_steps == 0:
+                seq_qpos.append(data.qpos.copy())
+                seq_qvel.append(data.qvel.copy())
+                seq_qacc.append(data.qacc.copy())
+    else:
+        raise ValueError(f"Unknown trajectory alignment: {trajectory_alignment}")
 
     seq_qpos = np.array(seq_qpos)
     seq_qvel = np.array(seq_qvel)
     seq_qacc = np.array(seq_qacc)
 
     traj_recon = {
-        'seq_torque': seq_torque[:-1],
+        'seq_torque': np.array(seq_torque[:len(seq_qpos)]),
         'seq_qacc': seq_qacc,
         'seq_qvel': seq_qvel,
         'seq_qpos': seq_qpos
@@ -1254,7 +1342,10 @@ def reconstruct_traj_using_torque(model, num_steps: int, dt: float, initial_qpos
     return traj_recon
 
 
-def reconstruct_traj_with_momentum(model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array, data_dt: float = None):
+def reconstruct_traj_with_momentum(
+    model, num_steps: int, dt: float, initial_qpos: np.array, initial_qvel: np.array, seq_torque: np.array,
+    data_dt: float = None, trajectory_alignment: str = 'pre_step'
+):
     """
     Reconstruct trajectory from torque, returning (qpos, mom, torque).
     
@@ -1270,6 +1361,7 @@ def reconstruct_traj_with_momentum(model, num_steps: int, dt: float, initial_qpo
         initial_qvel: Initial velocity
         seq_torque: Torque sequence at data_dt resolution (num_steps, torque_dim)
         data_dt: Data collection timestep (default: dt for backwards compatibility)
+        trajectory_alignment: 'pre_step' for synchronized trajectories, 'post_step' for legacy reconstruction
     
     Returns:
         dict with 'seq_qpos', 'seq_mom', 'seq_torque' at data_dt resolution
@@ -1286,170 +1378,47 @@ def reconstruct_traj_with_momentum(model, num_steps: int, dt: float, initial_qpo
     model.opt.timestep = dt
     data = mujoco.MjData(model)
 
-    data.qpos[:] = initial_qpos
-    data.qvel[:] = initial_qvel
+    qpos_dim = int(initial_qpos.shape[-1])
+    qvel_dim = int(initial_qvel.shape[-1])
+    data.qpos[:] = 0.0
+    data.qvel[:] = 0.0
+    data.qpos[:qpos_dim] = initial_qpos
+    data.qvel[:qvel_dim] = initial_qvel
+    mujoco.mj_forward(model, data)
 
     seq_qpos = []
     seq_mom = []
     M = np.zeros((model.nv, model.nv))
     
-    num_sim_steps = (num_steps - 1) * skip_steps
+    num_sim_steps = max(num_steps - 1, 0) * skip_steps
 
-    # Run simulation at fine timestep, collect at coarse intervals
-    for i in range(num_sim_steps):
-        # Apply torque: each torque in seq_torque is held for skip_steps iterations
-        torque_idx = i // skip_steps
-        data.ctrl[:] = seq_torque[torque_idx]
-        mujoco.mj_step(model, data)
-        
-        # Collect data at data_dt intervals (every skip_steps simulation steps)
-        if (i + 1) % skip_steps == 0:
-            # Compute mass matrix and momentum
+    if trajectory_alignment == 'pre_step':
+        for data_idx in range(num_steps):
             mujoco.mj_fullM(model, M, data.qM)
-            
-            seq_qpos.append(data.qpos.copy())
-            seq_mom.append((M @ data.qvel).copy())
+            seq_qpos.append(data.qpos[:qpos_dim].copy())
+            seq_mom.append((M @ data.qvel)[:qvel_dim].copy())
+            if data_idx == num_steps - 1:
+                break
+            tau_t = seq_torque[data_idx]
+            for _ in range(skip_steps):
+                data.ctrl[:] = tau_t
+                mujoco.mj_step(model, data)
+    elif trajectory_alignment == 'post_step':
+        for i in range(num_sim_steps):
+            torque_idx = i // skip_steps
+            data.ctrl[:] = seq_torque[torque_idx]
+            mujoco.mj_step(model, data)
+            if (i + 1) % skip_steps == 0:
+                mujoco.mj_fullM(model, M, data.qM)
+                seq_qpos.append(data.qpos[:qpos_dim].copy())
+                seq_mom.append((M @ data.qvel)[:qvel_dim].copy())
+    else:
+        raise ValueError(f"Unknown trajectory alignment: {trajectory_alignment}")
 
     traj_recon = {
         'seq_qpos': np.array(seq_qpos),
         'seq_mom': np.array(seq_mom),
-        'seq_torque': seq_torque[:-1]
+        'seq_torque': np.array(seq_torque[:len(seq_qpos)])
     }
 
     return traj_recon
-
-def compute_chunked_integration_energy(
-    seq_qpos: torch.Tensor,
-    seq_mom: torch.Tensor,
-    seq_torque: torch.Tensor,
-    hnn: nn.Module,
-    dt: float,
-    chunk_length: int,
-) -> torch.Tensor:
-    """
-    Compute integration energy over random chunks of the trajectory.
-    
-    This evaluates how well the HNN integrator can predict the trajectory over
-    short horizons (chunk_length), which is more stable than full-trajectory integration
-    and avoids boundary artifacts by using random chunks.
-    
-    Args:
-        seq_qpos: [B, T, qpos_dim] position trajectory
-        seq_mom: [B, T, mom_dim] momentum trajectory
-        seq_torque: [B, T, torque_dim] torque sequence
-        hnn: HNNWrapper model
-        dt: timestep
-        chunk_length: length of integration chunks
-        
-    Returns:
-        energy: scalar mean squared error between integrated and actual chunks
-    """
-    B, T, _ = seq_qpos.shape
-    
-    # Ensure we can fit at least one chunk
-    if T <= chunk_length:
-        raise ValueError(f"Trajectory length {T} must be greater than chunk_length {chunk_length}")
-    
-    # Select random start indices for each batch element
-    # Valid start range: [0, T - chunk_length - 1]
-    # We need T-chunk_length-1 because integration produces chunk_length+1 states (including t=0)
-    max_start = T - chunk_length - 1
-    start_indices = torch.randint(0, max_start + 1, (B,), device=seq_qpos.device)
-    
-    # Gather initial conditions and ground truth chunks
-    # We need to extract [start:start+chunk_length+1] for comparison
-    
-    # Helper to gather chunks: [B, chunk_len+1, dim]
-    def gather_chunks(tensor, starts, length):
-        batch_indices = torch.arange(B, device=tensor.device).unsqueeze(1)
-        time_indices = starts.unsqueeze(1) + torch.arange(length + 1, device=tensor.device).unsqueeze(0)
-        return tensor[batch_indices, time_indices]
-    
-    qpos_chunk_gt = gather_chunks(seq_qpos, start_indices, chunk_length)
-    mom_chunk_gt = gather_chunks(seq_mom, start_indices, chunk_length)
-    torque_chunk = gather_chunks(seq_torque, start_indices, chunk_length) # Torque needs to cover integration steps
-    
-    # Initial state for integration
-    q0 = qpos_chunk_gt[:, 0, :]
-    p0 = mom_chunk_gt[:, 0, :]
-    
-    # Torque sequence for integration: [chunk_length, B, dim]
-    # We take the first chunk_length torques (t=0 to t=chunk_length-1)
-    tau_seq = torque_chunk[:, :-1, :].permute(1, 0, 2)
-    
-    # Integrate forward
-    # Returns trajectories of shape [chunk_length+1, B, dim]
-    p_traj, q_traj, _ = hnn.integrate_trajectory(p0, q0, tau_seq, dt, chunk_length)
-    
-    # Permute back to [B, chunk_length+1, dim] for comparison
-    p_traj = p_traj.permute(1, 0, 2)
-    q_traj = q_traj.permute(1, 0, 2)
-    
-    # Compute MSE loss (energy)
-    # We compare the whole chunk including t=0 (which should be 0 error) and t=chunk_length
-    loss_q = nn.functional.mse_loss(q_traj, qpos_chunk_gt)
-    loss_p = nn.functional.mse_loss(p_traj, mom_chunk_gt)
-    
-    return loss_q + loss_p
-
-
-def run_adam_optimization_hnn_integration(
-    x: torch.Tensor,
-    seq_torque: torch.Tensor,
-    qpos_dim: int,
-    mom_dim: int,
-    dt: float,
-    hnn: nn.Module,
-    num_steps: int,
-    lr: float = 1e-3,
-    chunk_length: int = 15,
-) -> torch.Tensor:
-    """
-    Optimize trajectory using Adam with HNN integration-based energy (shooting method).
-
-    This uses chunked integration (k-step shooting) instead of derivative matching,
-    which enforces causal consistency over short horizons. Each optimization step
-    uses randomized chunk positions to avoid boundary artifacts.
-
-    Args:
-        x: State tensor [B, T, qpos_dim + mom_dim] with structure [qpos | mom]
-        seq_torque: Torque conditioning [B, T, torque_dim] (fixed, not optimized)
-        qpos_dim: Dimension of position
-        mom_dim: Dimension of momentum
-        dt: Timestep for integration
-        hnn: Trained Hamiltonian Neural Network (HNNWrapper)
-        num_steps: Number of optimization steps
-        lr: Learning rate for Adam optimizer
-        chunk_length: Length of integration chunks (default: 15)
-
-    Returns:
-        Optimized state tensor [B, T, qpos_dim + mom_dim]
-    """
-    B, T, _ = x.shape
-
-    # Validate chunk length
-    if T <= chunk_length:
-        print(f"[Warning] Trajectory length {T} <= chunk_length {chunk_length}, falling back to derivative matching")
-        return run_adam_optimization_hnn(x, seq_torque, qpos_dim, mom_dim, dt, hnn, num_steps, lr)
-
-    seq_qpos = nn.Parameter(x[:, :, :qpos_dim].clone())
-    seq_mom = nn.Parameter(x[:, :, qpos_dim:qpos_dim + mom_dim].clone())
-
-    optimizer = torch.optim.Adam([seq_qpos, seq_mom], lr=lr)
-
-    for i in trange(num_steps, desc='Running Adam Integration Optimization'):
-        optimizer.zero_grad()
-
-        energy = compute_chunked_integration_energy(
-            seq_qpos, seq_mom, seq_torque, hnn, dt, chunk_length
-        )
-
-        if i == 0 or i == num_steps - 1:
-            print(f'Integration Energy: {energy.item():.6f}')
-
-        energy.backward()
-        optimizer.step()
-
-    new_x = torch.cat([seq_qpos.data, seq_mom.data], dim=-1)
-
-    return new_x

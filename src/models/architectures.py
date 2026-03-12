@@ -8,6 +8,7 @@ This module contains the core model architecture classes extracted from trajecto
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -869,13 +870,13 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
         self,
         contexts: torch.Tensor,
         queries: torch.Tensor,
-        torque: torch.Tensor,
+        torque: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Args:
             contexts: [B, N_ctx, num_input_channels] - context tokens (state + pos encodings, no torque)
             queries: [B, N_qry, num_input_channels] - query tokens (state + pos encodings, no torque)
-            torque: [B, N_qry, torque_dim] - raw torque for conditioning (normalized to [-1, 1])
+            torque: [B, N_qry, torque_dim] - optional torque conditioning (normalized to [-1, 1])
         Returns:
             predictions: [B, N_qry, num_output_channels] - predicted noise
 
@@ -890,11 +891,13 @@ class ConditionedTrajectoryPerceiverIO(nn.Module):
 
         # ---- Ablation: torque_in_tokens (baseline) ----
         if cfg.torque_in_tokens:
+            if torque is None:
+                raise ValueError("torque must be provided when torque_in_tokens=True")
             queries = torch.cat([queries, torque], dim=-1)
             contexts = torch.cat([contexts, torque[:, :N_ctx, :]], dim=-1)
 
         # ---- Compute conditioning (only when AdaLN is active) ----
-        if cfg.use_adaln:
+        if cfg.use_adaln and torque is not None:
             # Torque embedding for full query sequence
             u_emb = self.torque_conditioner(torque)  # [B, T, cond_dim]
 

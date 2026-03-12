@@ -4,17 +4,44 @@ import pytorch_lightning as pl
 from torch.utils.data import Dataset, DataLoader, random_split
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
 from pytorch_lightning.loggers import WandbLogger
 from tqdm import tqdm
 import mujoco
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from scripts.dataset import TrajectoryHNNCached
+from scripts.data.dataset import TrajectoryHNNCached
+
+
+def infer_torque_gain_from_xml(xml_path: str, coordinate_dim: int, default_gain: float = 1.0):
+    """Infer per-joint motor gear gains from MuJoCo XML actuator motors.
+
+    Falls back to `default_gain` when XML is missing/unreadable or actuator parsing fails.
+    """
+    gains = np.full((coordinate_dim,), float(default_gain), dtype=np.float32)
+    if not xml_path or not os.path.exists(xml_path):
+        return gains
+    try:
+        root = ET.parse(xml_path).getroot()
+        motors = root.findall(".//actuator/motor")
+        if not motors:
+            return gains
+        for i, motor in enumerate(motors[:coordinate_dim]):
+            gear_attr = motor.get("gear", None)
+            if gear_attr is None:
+                continue
+            # MuJoCo allows vector gear; use first component for hinge motors.
+            first = float(gear_attr.strip().split()[0])
+            gains[i] = first
+    except Exception:
+        return gains
+    return gains
 
 
 # -----------------------------------------------------------------------------
@@ -29,6 +56,10 @@ class PhysicsCheckCallback(pl.Callback):
     def on_validation_epoch_end(self, trainer, pl_module):
         if trainer.global_rank != 0:
             return
+        # Sanity validation runs before training starts; heavy MuJoCo/W&B work here
+        # can stall the handoff into epoch 0 and produces no useful signal.
+        if getattr(trainer, "sanity_checking", False):
+            return
         if trainer.current_epoch % self.check_every_n_epochs != 0:
             return
         
@@ -38,18 +69,26 @@ class PhysicsCheckCallback(pl.Callback):
         model.opt.timestep = self.dt
         data = mujoco.MjData(model)
         
-        # Use same initial range as training data
-        data.qpos[:] = np.random.uniform(-0.5, 0.5, size=(model.nq,))
-        data.qvel[:] = np.random.uniform(-0.5, 0.5, size=(model.nv,))
+        # The Reacher HNN dataset may drop target states and keep only arm DoFs.
+        # Match callback inputs to the model's learned state dimension to avoid
+        # feeding extra MuJoCo coordinates that were not used in training.
+        state_dim = int(pl_module.q_std.numel()) if torch.is_tensor(pl_module.q_std) else int(np.size(pl_module.q_std))
+        state_dim = min(state_dim, model.nq, model.nv)
+
+        # Initialize full MuJoCo state, but only randomize the learned arm subspace.
+        data.qpos[:] = 0.0
+        data.qvel[:] = 0.0
+        data.qpos[:state_dim] = np.random.uniform(-0.5, 0.5, size=(state_dim,))
+        data.qvel[:state_dim] = np.random.uniform(-0.5, 0.5, size=(state_dim,))
 
         M = np.zeros((model.nv, model.nv))
         mujoco.mj_forward(model, data)
         # Use mj_fullM instead of obsolete MjModel functions
         mujoco.mj_fullM(model, M, data.qM)
 
-        seq_qpos = [data.qpos.copy()]
+        seq_qpos = [data.qpos[:state_dim].copy()]
         seq_qvel = [data.qvel.copy()]
-        seq_mom = [(M @ data.qvel).copy()]
+        seq_mom = [(M @ data.qvel)[:state_dim].copy()]
         seq_true_energy = [data.energy[0] + data.energy[1]]  # KE + PE from MuJoCo
 
         # Match training trajectory length (1000 steps)
@@ -57,9 +96,9 @@ class PhysicsCheckCallback(pl.Callback):
         for _ in range(num_steps):
             mujoco.mj_step(model, data)
             mujoco.mj_fullM(model, M, data.qM)
-            seq_qpos.append(data.qpos.copy())
+            seq_qpos.append(data.qpos[:state_dim].copy())
             seq_qvel.append(data.qvel.copy())
-            seq_mom.append((M @ data.qvel).copy())
+            seq_mom.append((M @ data.qvel)[:state_dim].copy())
             seq_true_energy.append(data.energy[0] + data.energy[1])
 
         # Convert to arrays for analysis
@@ -103,7 +142,9 @@ class PhysicsCheckCallback(pl.Callback):
         plt.tight_layout()
         if isinstance(trainer.logger, WandbLogger):
             trainer.logger.log_image("Energy Conservation", images=[fig])
-        plt.savefig('/home/gsang/Projects/Perceiver_IO/plots/Energy Conservation.jpg')
+        out_dir = '/home/gsang/Projects/Perceiver_IO/plots/training_debug'
+        os.makedirs(out_dir, exist_ok=True)
+        plt.savefig(f'{out_dir}/Energy_Conservation.jpg')
         plt.close()
 
 # -----------------------------------------------------------------------------
@@ -260,7 +301,8 @@ class TorquePredictor(nn.Module):
 class HNNWrapper(pl.LightningModule):
     def __init__(self, coordinate_dim, momenta_dim, use_torque=True, predict_torque=True,
                  qvel_var=1.0, mom_dot_var=1.0, q_std=1.0, p_std=1.0, eps: float = 1e-8,
-                 model_type='structured', hidden_dim=256, num_layers=4, lr=3e-4):
+                 model_type='structured', hidden_dim=256, num_layers=4, lr=3e-4,
+                 torque_gain=1.0):
         super().__init__()
         self.save_hyperparameters()  # Save hyperparameters for checkpoint loading
         if model_type == 'structured':
@@ -286,6 +328,13 @@ class HNNWrapper(pl.LightningModule):
         # Input scaling statistics (prefer per-dimension tensors; fall back to scalar)
         self.register_buffer('q_std', torch.as_tensor(q_std, dtype=torch.float32))
         self.register_buffer('p_std', torch.as_tensor(p_std, dtype=torch.float32))
+        self.register_buffer('torque_gain', torch.as_tensor(torque_gain, dtype=torch.float32))
+
+    def _scale_torque(self, torque):
+        """Convert control-space torque to generalized force-space via gear gain."""
+        if torque is None:
+            return None
+        return torque * self.torque_gain
 
     def forward(self, p, q): 
         # Apply scaling during inference if needed
@@ -416,11 +465,11 @@ class HNNWrapper(pl.LightningModule):
                 
                 # Use ground-truth torque
                 if self.use_torque and not self.predict_torque:
-                    dpdt_pred = dpdt_pred + torque_target
+                    dpdt_pred = dpdt_pred + self._scale_torque(torque_target)
                 # Use predicted torque
                 elif self.use_torque and self.predict_torque:
                     torque_pred = self.torque_predictor(q_raw, dqdt_target, qacc_target)
-                    dpdt_pred = dpdt_pred + torque_pred
+                    dpdt_pred = dpdt_pred + self._scale_torque(torque_pred)
                     loss_torque = nn.functional.mse_loss(torque_target, torque_pred)
                 
 
@@ -486,6 +535,8 @@ class HNNWrapper(pl.LightningModule):
             print(f"torque mse={nn.functional.mse_loss(torque, predicted_torque)}")
         else:
             predicted_torque = torque
+        predicted_torque_phys = self._scale_torque(predicted_torque)
+        torque_phys = self._scale_torque(torque)
         
         # Plot torque comparison for each dimension
         num_dims = torque.shape[1]
@@ -534,7 +585,7 @@ class HNNWrapper(pl.LightningModule):
                 )
 
                 # Compute p_dot using Hamilton's equation: p_dot = -∂H/∂q + torque
-                p_dot_model = -dH_dq + predicted_torque
+                p_dot_model = -dH_dq + predicted_torque_phys
 
                 # NOTE:
                 # The identity dH/dt = qdot^T * tau holds when qdot = dH/dp and pdot = -dH/dq + tau
@@ -550,7 +601,7 @@ class HNNWrapper(pl.LightningModule):
                 )  # [B, 1]
 
                 # Equivalent power form (model): qdot_model^T * tau
-                dHdt_model_power = torch.einsum('b i, b i -> b', qdot_model, predicted_torque).unsqueeze(-1)
+                dHdt_model_power = torch.einsum('b i, b i -> b', qdot_model, predicted_torque_phys).unsqueeze(-1)
 
                 # Data-consistency energy rate: derivative of learned H along the *data* trajectory
                 # dH/dt = (∂H/∂q)^T * qvel_data + (∂H/∂p)^T * mom_dot_data
@@ -560,7 +611,7 @@ class HNNWrapper(pl.LightningModule):
                 )  # [B, 1]
 
                 # Power from data velocity: qvel_data^T * tau
-                dHdt_data_power = torch.einsum('b i, b i -> b', qvel, predicted_torque).unsqueeze(-1)
+                dHdt_data_power = torch.einsum('b i, b i -> b', qvel, predicted_torque_phys).unsqueeze(-1)
 
         # MSE checks for energy identity (model self-consistency) and data consistency
         mse_energy_model = nn.functional.mse_loss(dHdt_model_chain, dHdt_model_power)
@@ -569,7 +620,7 @@ class HNNWrapper(pl.LightningModule):
         # MSE checks for Hamilton's equations (raw + normalized)
         # Use ground truth torque for physics check to isolate HNN performance
         err_qvel = (dH_dp - qvel)
-        err_mom_dot = (-dH_dq + torque - mom_dot)
+        err_mom_dot = (-dH_dq + torque_phys - mom_dot)
         mse_qvel = torch.mean(err_qvel ** 2)
         mse_mom_dot = torch.mean(err_mom_dot ** 2)
         nmse_qvel = torch.mean((err_qvel ** 2) / (self.qvel_var + self.eps))
@@ -668,7 +719,7 @@ class HNNWrapper(pl.LightningModule):
             
             # Predicted next state using learned dynamics
             q_next_pred = qpos + dt * dH_dp
-            p_next_pred = mom + dt * (-dH_dq + predicted_torque)
+            p_next_pred = mom + dt * (-dH_dq + predicted_torque_phys)
             
             # Ground truth next state (Euler approximation from data)
             q_next_gt = qpos + dt * qvel
@@ -733,8 +784,8 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Train or test HNN")
     parser.add_argument("--mode", type=str, default="train", choices=["train", "test"])
-    parser.add_argument("--train_file", type=str, default="/home/gsang/Projects/Perceiver_IO/data/traj_80000-steps_4000.h5")
-    parser.add_argument("--test_file", type=str, default="/home/gsang/Projects/Perceiver_IO/data/traj_2000-steps_4000.h5")
+    parser.add_argument("--train_file", type=str, default="/home/gsang/Projects/Perceiver_IO/data/3dof/traj_40000-steps_4000.h5")
+    parser.add_argument("--test_file", type=str, default="/home/gsang/Projects/Perceiver_IO/data/3dof/traj_2000-steps_4000.h5")
     parser.add_argument("--checkpoint_dir", type=str, default="/home/gsang/Projects/Perceiver_IO/checkpoints")
     parser.add_argument("--checkpoint_prefix", type=str, default="SeperableHNN(dim1024)-CELU")
     parser.add_argument("--wandb_name", type=str, default="SeperableHNN(dim1024)-3D-Hinge-CELU")
@@ -748,6 +799,21 @@ if __name__ == "__main__":
                         help="Hidden dimension for structured model (default: 256)")
     parser.add_argument("--num_layers", type=int, default=4,
                         help="Number of layers for structured model (default: 4)")
+    parser.add_argument("--torque_gain", type=float, default=1.0,
+                        help="Fallback scalar gain to map control input to generalized torque.")
+    parser.add_argument("--auto_torque_gain_from_xml", action="store_true", default=False,
+                        help="Infer per-joint motor gear gain from XML actuator motors.")
+    parser.add_argument(
+        "--torque_alignment",
+        type=str,
+        default="auto",
+        choices=["auto", "legacy", "transition_next"],
+        help="How to align saved torque samples with states in the HNN dataset loader.",
+    )
+    parser.add_argument("--num_workers", type=int, default=8,
+                        help="DataLoader worker processes for cached HNN datasets.")
+    parser.add_argument("--disable_verify_callback", action="store_true", default=False,
+                        help="Disable the MuJoCo/W&B physics verification callback.")
     args = parser.parse_args()
 
     # Optimize matmul performance for NVIDIA A100 GPUs
@@ -767,7 +833,11 @@ if __name__ == "__main__":
         print("-"*60)
         print(f"Loading dataset from {train_file}...")
 
-        full_dataset = TrajectoryHNNCached(train_file, trajectory_length=1000)
+        full_dataset = TrajectoryHNNCached(
+            train_file,
+            trajectory_length=1000,
+            torque_alignment=args.torque_alignment,
+        )
         
         # Split into train/val (e.g., 90/10 split)
         # If the file has 2000 samples, this gives 1800 train, 200 val
@@ -776,26 +846,32 @@ if __name__ == "__main__":
         # train_data, val_data = random_split(full_dataset, [train_len, val_len], generator=torch.Generator().manual_seed(42))
 
         train_data = full_dataset
-        val_data = TrajectoryHNNCached(test_file)
+        val_data = TrajectoryHNNCached(
+            test_file,
+            torque_alignment=args.torque_alignment,
+        )
         
         # Smaller batch = more gradient updates per epoch = faster convergence
         batch_size_per_gpu = 2048 if args.model_type == 'structured' else 8192
         
+        # This dataset is fully cached in RAM and very large; persistent workers
+        # have repeatedly hung at the train/val boundary in practice.
+        use_persistent_workers = False
         train_loader = DataLoader(
             train_data, 
             batch_size=batch_size_per_gpu, 
             shuffle=True, 
-            num_workers=8, # Increased workers
+            num_workers=args.num_workers,
             pin_memory=True,
-            persistent_workers=True
+            persistent_workers=use_persistent_workers
         )
         val_loader = DataLoader(
             val_data, 
             batch_size=batch_size_per_gpu, 
             shuffle=False, 
-            num_workers=8, # Increased workers
+            num_workers=args.num_workers,
             pin_memory=True,
-            persistent_workers=True
+            persistent_workers=use_persistent_workers
         )
 
 
@@ -805,7 +881,9 @@ if __name__ == "__main__":
             every_n_epochs=50,  # Save every 50 epochs to reduce I/O
             save_top_k=-1)     # Keep all checkpoints (don't delete old ones)
 
-        verify_callback = PhysicsCheckCallback(check_every_n_epochs=50, dt=0.0002, xml_path=args.xml_path)
+        verify_callback = None
+        if not args.disable_verify_callback:
+            verify_callback = PhysicsCheckCallback(check_every_n_epochs=50, dt=0.0002, xml_path=args.xml_path)
         # Only refresh progress bar every 100 batches - prevents SSH lag!
         progress_bar = TQDMProgressBar(refresh_rate=100)
         wandb_logger = WandbLogger(project='HNN_Hinge', name=args.wandb_name, save_dir='/home/gsang/Projects/Perceiver_IO/wandb')
@@ -814,14 +892,25 @@ if __name__ == "__main__":
         print("-"*60)
         print(" "*25+"Start Testing")
         print("-"*60)
-        test_data = TrajectoryHNNCached(test_file)
-        
-        test_loader = DataLoader(test_data, batch_size=8192*2, shuffle=False, num_workers=4)
+        test_data = TrajectoryHNNCached(
+            test_file,
+            torque_alignment=args.torque_alignment,
+        )
+        batch_size_per_gpu = 8192 * 2
+        test_loader = DataLoader(
+            test_data,
+            batch_size=batch_size_per_gpu,
+            shuffle=False,
+            num_workers=args.num_workers,
+        )
         
     # Detect dimension and statistics from dataset
     test_data = None
     if mode == 'test':
-        test_data = TrajectoryHNNCached(test_file)
+        test_data = TrajectoryHNNCached(
+            test_file,
+            torque_alignment=args.torque_alignment,
+        )
         
     sample = train_data[0] if mode == 'train' else test_data[0]
     dim = sample['qpos'].shape[0]
@@ -845,20 +934,31 @@ if __name__ == "__main__":
     lr = 3e-4 * (batch_size_per_gpu / 8192) ** 0.5
     print(f"Learning rate: {lr:.2e} (sqrt-scaled from 3e-4 at bs=8192 to bs={batch_size_per_gpu})")
 
+    torque_gain = np.full((dim,), float(args.torque_gain), dtype=np.float32)
+    if args.auto_torque_gain_from_xml:
+        torque_gain = infer_torque_gain_from_xml(args.xml_path, dim, default_gain=args.torque_gain)
+    print(f"Torque gain used (per dim): {torque_gain.tolist()}")
+
     pl_model = HNNWrapper(dim, dim, use_torque=use_torque, predict_torque=predict_torque,
                           qvel_var=qvel_var, mom_dot_var=mom_dot_var,
                           q_std=q_std, p_std=p_std,
                           model_type=args.model_type, hidden_dim=args.hidden_dim,
-                          num_layers=args.num_layers, lr=lr)
+                          num_layers=args.num_layers, lr=lr,
+                          torque_gain=torque_gain)
     
+    trainer_devices = [0]
+    trainer_strategy = 'auto'
+    if len(trainer_devices) > 1:
+        trainer_strategy = 'ddp_find_unused_parameters_true'
+
     trainer = pl.Trainer(
         max_epochs=1000, 
         accelerator='gpu', 
-        devices=[0],  # When CUDA_VISIBLE_DEVICES=3 is set, device 0 = physical GPU 3
-        strategy='ddp_find_unused_parameters_true',
+        devices=trainer_devices,  # When CUDA_VISIBLE_DEVICES is set, device 0 maps to the selected physical GPU
+        strategy=trainer_strategy,
         # Revert to float32 for high-precision gradients required by HNNs
         precision=32,
-        callbacks=[checkpoint_callback, verify_callback, progress_bar] if mode == 'train' else [], 
+        callbacks=[cb for cb in [checkpoint_callback, verify_callback, progress_bar] if cb is not None] if mode == 'train' else [], 
         logger=wandb_logger if mode == 'train' else None,
         enable_progress_bar=True,
         log_every_n_steps=50,
@@ -875,4 +975,3 @@ if __name__ == "__main__":
         trainer.fit(pl_model, train_loader, val_loader)
     elif mode == 'test':
         trainer.test(pl_model, test_loader, ckpt_path=test_checkpoint_file)
-

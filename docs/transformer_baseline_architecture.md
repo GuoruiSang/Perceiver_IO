@@ -1,78 +1,62 @@
-# Transformer Baseline Architecture (Standard Diffusion)
+# Transformer Baseline Architecture
 
-Last updated: 2026-02-10
+Last updated: 2026-03-11
 
-## Purpose
+This document specifies the standard-diffusion transformer backbone used for the final 2DoF and 3DoF comparisons.
 
-This document specifies the current `--backbone transformer` baseline used for standard diffusion comparisons against DPF/PerceiverIO.
+## Entry points
 
-## Entry Points
+- model class: `src/models/architectures.py` -> `TrajectoryTransformerDiffusion`
+- training CLI: `src/models/trajectory_dpf.py` -> `--backbone transformer`
+- launcher: `scripts/train/train_transformer_diffusion_fixed_length.sh`
 
-- Model class: `src/models/architectures.py` -> `TrajectoryTransformerDiffusion`
-- Backbone switch: `src/models/trajectory_dpf.py` -> `--backbone {perceiverio, transformer}`
+## Fixed-budget reproduction
 
-## Forward Architecture
+Run the two systems separately with explicit time budgets:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 SYSTEM=2dof DEVICES="0 1" TIME_LIMIT_SEC=88612 \
+  bash scripts/train/train_transformer_diffusion_fixed_length.sh
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=2,3 SYSTEM=3dof DEVICES="0 1" TIME_LIMIT_SEC=87992 \
+  bash scripts/train/train_transformer_diffusion_fixed_length.sh
+```
+
+## Forward architecture
 
 For input tokens `x_tokens` with shape `[B, T, C_in]`:
 
-1. `input_proj`: `Linear(C_in -> d_model)`
-2. `input_norm`: `LayerNorm(d_model)`
-3. `encoder`: `TransformerEncoder(num_layers)`
-   - each layer is `TransformerEncoderLayer`
-   - `nhead = 8`
-   - `dim_feedforward = 4 * d_model`
-   - `activation = GELU`
-   - `norm_first = True` (pre-LN)
-   - `dropout = 0.0`
-4. `output_norm`: `LayerNorm(d_model)`
-5. `output_proj`: `Linear(d_model -> state_dim)`
+1. `Linear(C_in -> d_model)`
+2. `LayerNorm(d_model)`
+3. `TransformerEncoder(num_layers)`
+4. `LayerNorm(d_model)`
+5. `Linear(d_model -> state_dim)`
 
-Output is full-sequence epsilon prediction:
+Project defaults:
 
-- `eps_pred` shape: `[B, T, state_dim]`
-
-## Token Construction
-
-In transformer mode, token order is:
-
-`x_tokens = concat(normalized_state, torque_norm, diffusion_enc, temporal_enc)`
-
-where:
-
-- `normalized_state`: `[B, T, state_dim]` (`state_dim = qpos_dim + mom_dim`)
-- `torque_norm`: `[B, T, torque_dim]`
-- `diffusion_enc`: Fourier embedding of current diffusion step, broadcast across `T`
-- `temporal_enc`: absolute sinusoidal time embedding for trajectory index
-
-## Noise Application
-
-Only the state slice is noised during diffusion training/sampling:
-
-- noised slice: first `state_dim` channels
-- conditioning slices (`torque_norm`, `diffusion_enc`, `temporal_enc`) are not noised
-
-## Training-Specific Notes
-
-- `num_context` is sampled/logged for compatibility with shared training code.
-- In transformer mode, `num_context` is **not used** for forward pass.
-- There is no context/query split in transformer mode.
-
-## Difference from PerceiverIO Backbone
-
-- Transformer baseline:
-  - no latent bottleneck
-  - no Perceiver cross-attention decoder
-  - predicts full sequence directly
-- DPF/PerceiverIO:
-  - latent array + cross-attention decoding
-  - context/query pathway and torque-conditioned Perceiver blocks
-
-## Default Hyperparameter Mapping (current)
-
-When training with existing CLI defaults used in this project:
-
-- `d_model = num_latent_channels` (typically 256)
-- `num_layers = num_decoder_blocks` (typically 4)
+- `d_model = num_latent_channels = 256`
+- `num_layers = num_decoder_blocks = 4`
 - `nhead = 8`
+- `dropout = 0.0`
+- `activation = GELU`
+- `norm_first = True`
 
-This mapping keeps training scripts simple while preserving a single CLI surface.
+## Token construction
+
+Transformer mode uses:
+
+- normalized state
+- normalized torque
+- diffusion-step embedding
+- absolute temporal embedding
+
+Only the state slice is noised during diffusion.
+
+## Final baseline checkpoints
+
+- 2DoF:
+  - `checkpoints/2dof/transformer_diffusion/trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&FixedTrajLength1000&UniformContext&EncoderNone&DecoderAttentions_backbone-transformer:epoch=2999_val_loss:val_loss=0.0009.ckpt`
+- 3DoF:
+  - `checkpoints/3dof/transformer_diffusion/trajectory_dpf_StateOnlyAdaLN_x0Stabilized&AbsoluteTimeEncoding&FixedTrajLength1000&UniformContext&EncoderNone&DecoderAttentions_backbone-transformer:epoch=2999_val_loss:val_loss=0.0008.ckpt`

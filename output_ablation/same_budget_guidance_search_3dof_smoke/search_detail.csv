@@ -1,3 +1,0 @@
-model,candidate_id,policy,length,seed,med_ung_nrmse_q,med_gui_nrmse_q,med_ung_nrmse_p,med_gui_nrmse_p,ratio_q,ratio_p,prob_q,prob_p
-dpf,mode=robust_hamres|steps=30|after=10|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.0|ham_sigma=1.0|ham_delta=2.0,sinusoidal,100,10,0.27902068151301973,0.49063862554228,0.17372765361673728,0.11793305096974084,1.7584310341503688,0.6788386794765237,0.0,0.5
-fixed_diffusion,mode=robust_hamres|steps=30|after=10|before=20|alpha_q=0.01|alpha_p=0.01|trust=0.0|ham_sigma=1.0|ham_delta=2.0,sinusoidal,100,10,0.6787556259012915,0.6114716085305664,0.5664764631947976,0.6154554228957798,0.9008715142782332,1.0864624797026023,1.0,0.5

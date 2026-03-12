@@ -1,8 +1,0 @@
-{
-  "guidance_lr": 0.001,
-  "guidance_steps": 50,
-  "guidance_after_steps": 40,
-  "hamres_median": 0.06557474688005871,
-  "hamres_mean": 0.07106260054141272,
-  "nmse_mean": 0.04077805734932036
-}
