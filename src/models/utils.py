@@ -440,7 +440,8 @@ def _align_generated_and_reconstructed(
 
 def compare_generated_with_reconstructed(
     generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, data_dt: float = None,
-    name: str = None, trajectory_alignment: str = 'pre_step', return_series: bool = False
+    name: str = None, trajectory_alignment: str = 'pre_step', return_series: bool = False,
+    prefix_len: int = 0,
 ) -> dict:
     """
     Compare generated trajectory with physics-reconstructed trajectory.
@@ -530,6 +531,7 @@ def compare_generated_with_reconstructed(
         # Add MSE info to the figure title
         fig.suptitle(f'MSE: qpos={mse_qpos:.6f}, mom={mse_mom:.6f}, total={mse_total:.6f}', fontsize=14, y=1.02)
         
+        prefix_len = max(0, int(prefix_len))
         for i, key in enumerate(keys):
             if key == 'seq_qpos':
                 gen_data = gen_qpos
@@ -543,8 +545,19 @@ def compare_generated_with_reconstructed(
             t = np.arange(len(gen_data))
             for j in range(gen_data.shape[-1]):
                 if j < ncols:
-                    axes[i, j].scatter(t, gen_data[:, j], s=1, c='blue', label='Generated', alpha=0.7)
-                    axes[i, j].scatter(t, recon_data[:, j], s=1, c='red', label='Reconstructed', alpha=0.7)
+                    prefix_end = min(prefix_len, len(gen_data))
+                    if prefix_end > 0:
+                        axes[i, j].scatter(
+                            t[:prefix_end], gen_data[:prefix_end, j], s=1, c='black', label='Prefix', alpha=0.9
+                        )
+                    axes[i, j].scatter(
+                        t[prefix_end:], gen_data[prefix_end:, j], s=1, c='blue', label='Generated', alpha=0.7
+                    )
+                    axes[i, j].scatter(
+                        t[prefix_end:], recon_data[prefix_end:, j], s=1, c='red', label='Reconstructed', alpha=0.7
+                    )
+                    if prefix_end > 0:
+                        axes[i, j].axvline(prefix_end - 1, color='gray', linestyle=':', linewidth=1.0)
                     axes[i, j].set_title(f'{key}[{j}]')
                     axes[i, j].legend(markerscale=5)
             for j in range(gen_data.shape[-1], ncols):

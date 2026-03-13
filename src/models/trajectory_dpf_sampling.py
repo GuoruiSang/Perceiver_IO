@@ -14,6 +14,73 @@ from scripts.data.generate_dataset_forward import (
 
 
 class TrajectoryDPFSampling:
+    def _expand_sampling_tensor(
+        self,
+        tensor: Optional[torch.Tensor],
+        num_samples: int,
+        trajectory_length: int,
+        expected_last_dim: int,
+        name: str,
+    ) -> Optional[torch.Tensor]:
+        if tensor is None:
+            return None
+        if tensor.ndim != 3:
+            raise ValueError(f"{name} must have shape [B,T,{expected_last_dim}], got {tuple(tensor.shape)}")
+        if tensor.shape[-1] != expected_last_dim:
+            raise ValueError(
+                f"{name} last dim must equal {expected_last_dim}, got {tensor.shape[-1]}"
+            )
+        if tensor.shape[1] < trajectory_length:
+            raise ValueError(
+                f"{name} must have at least trajectory_length={trajectory_length} timesteps, got {tensor.shape[1]}"
+            )
+        if tensor.shape[0] == 1 and num_samples > 1:
+            tensor = tensor.expand(num_samples, -1, -1)
+        elif tensor.shape[0] != num_samples:
+            raise ValueError(
+                f"{name} batch dim must be 1 or num_samples={num_samples}, got {tensor.shape[0]}"
+            )
+        return tensor[:, :trajectory_length, :].to(device=self.device, dtype=torch.float32)
+
+    def _build_sampling_state(
+        self,
+        qpos: torch.Tensor,
+        mom: torch.Tensor,
+        torque: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if self.unconditional_tau_in_state:
+            if torque is None:
+                raise ValueError("torque is required when conditioning_mode concatenates torque into state")
+            torque_tokens = self._shift_torque_sequence(torque) if self.use_shifted_tau_tokens else torque
+            return torch.cat([qpos, mom, torque_tokens], dim=-1)
+        return torch.cat([qpos, mom], dim=-1)
+
+    def _apply_observed_prefix_constraint(
+        self,
+        x: torch.Tensor,
+        observed_prefix_state_norm: Optional[torch.Tensor],
+        prefix_len: int,
+    ) -> torch.Tensor:
+        if observed_prefix_state_norm is None or prefix_len <= 0:
+            return x
+        x[:, :prefix_len, :] = observed_prefix_state_norm[:, :prefix_len, :]
+        return x
+
+    def _build_sampling_context_indices(
+        self,
+        seq_len: int,
+        subset_len: int,
+        device: torch.device,
+        strategy: str = "prefix",
+    ) -> torch.Tensor:
+        subset_len = max(1, min(int(subset_len), int(seq_len)))
+        if strategy == "prefix":
+            return torch.arange(subset_len, device=device, dtype=torch.long)
+        if strategy == "query_subset":
+            idx = torch.randperm(seq_len, device=device)[:subset_len]
+            return torch.sort(idx).values
+        raise ValueError(f"Unsupported context selection strategy: {strategy}")
+
     def _predict_x0(
         self, 
         x_t: torch.Tensor, 
@@ -155,6 +222,11 @@ class TrajectoryDPFSampling:
         trajectory_length: int,
         num_diffusion_steps: int = None,
         context_fraction: float = 0.7,
+        sample_mode: Optional[str] = None,
+        prefix_len: Optional[int] = None,
+        observed_qpos: torch.Tensor = None,
+        observed_mom: torch.Tensor = None,
+        observed_torque: torch.Tensor = None,
         use_ema: bool = True,
         sampler: str = "ddim",
         # CFG parameters
@@ -244,8 +316,53 @@ class TrajectoryDPFSampling:
             print(f"[Sampling] Using regular model weights (use_ema=False)")
         
         device = self.device
+
+        resolved_sample_mode = (
+            sample_mode
+            if sample_mode is not None
+            else (
+                "observed_prefix_completion"
+                if getattr(self, "query_context_mode", "random_subset") == "clean_prefix_noisy_suffix"
+                else "generic_full_trajectory"
+            )
+        )
+        if resolved_sample_mode not in {"generic_full_trajectory", "observed_prefix_completion"}:
+            raise ValueError(f"Unsupported sample_mode: {resolved_sample_mode}")
+
+        observed_qpos = self._expand_sampling_tensor(
+            observed_qpos, num_samples, trajectory_length, self.qpos_dim, "observed_qpos"
+        )
+        observed_mom = self._expand_sampling_tensor(
+            observed_mom, num_samples, trajectory_length, self.mom_dim, "observed_mom"
+        )
+        observed_torque = self._expand_sampling_tensor(
+            observed_torque, num_samples, trajectory_length, self.torque_dim, "observed_torque"
+        )
+
+        if resolved_sample_mode == "observed_prefix_completion":
+            if observed_qpos is None or observed_mom is None:
+                print(
+                    "[Sampling] Prefix completion requested but observed_qpos/observed_mom were not provided; "
+                    "falling back to generic full-trajectory sampling."
+                )
+                resolved_sample_mode = "generic_full_trajectory"
+            elif self.unconditional_tau_in_state and observed_torque is None:
+                print(
+                    "[Sampling] Prefix completion in concat-state mode requires observed_torque; "
+                    "falling back to generic full-trajectory sampling."
+                )
+                resolved_sample_mode = "generic_full_trajectory"
+            else:
+                prefix_len = (
+                    max(1, min(trajectory_length - 1, int(round(context_fraction * trajectory_length))))
+                    if prefix_len is None
+                    else int(prefix_len)
+                )
+                prefix_len = max(1, min(prefix_len, trajectory_length - 1))
+        else:
+            prefix_len = 0
         
-        # Generate or use provided torque conditioning unless tau is part of state.
+        # Generate or use provided torque conditioning unless torque is concatenated into state.
         if self.unconditional_tau_in_state:
             torque = None
             cond = None
@@ -269,12 +386,24 @@ class TrajectoryDPFSampling:
                 )
             else:
                 torque = torque.to(device)
-        
+            if observed_torque is not None:
+                torque = observed_torque
+
         # Start with pure noise for state (qpos, mom)
         if initial_noise is not None:
             x = initial_noise.to(device)
         else:
             x = torch.randn(num_samples, trajectory_length, self.state_dim, device=device)
+
+        observed_prefix_state_norm = None
+        if resolved_sample_mode == "observed_prefix_completion":
+            observed_state = self._build_sampling_state(
+                observed_qpos,
+                observed_mom,
+                torque=observed_torque if self.unconditional_tau_in_state else None,
+            )
+            observed_prefix_state_norm = self.normalize_state(observed_state)
+            x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
         
         if not self.unconditional_tau_in_state:
             # Normalized conditioning (torque passed separately for AdaLN)
@@ -296,16 +425,36 @@ class TrajectoryDPFSampling:
             raise ValueError(f"Unknown sampler: {sampler}")
         
         if self.unconditional_tau_in_state:
-            print("[Sampling] Unconditional mode: tau is part of state; CFG/conditioning disabled.")
+            print("[Sampling] Concat-state mode: torque is part of state; CFG/conditioning disabled.")
         else:
             print(f"[Sampling] CFG guidance_scale={guidance_scale}")
         
+        context_idx = None
         if self.backbone != "transformer":
             # PREFIX context: use first num_context timesteps (not random)
             # IMPORTANT: Cap context length to training max to avoid OOD encoder behavior when extending
-            max_context_train = int(self.max_timesteps * context_fraction)
-            num_context = max(1, min(trajectory_length - 1, max_context_train))
-            print(f"[Sampling] Context length: {num_context} (capped at {max_context_train} from training length {self.max_timesteps})")
+            if resolved_sample_mode == "observed_prefix_completion":
+                num_context = prefix_len
+                context_idx = self._build_sampling_context_indices(
+                    trajectory_length,
+                    num_context,
+                    device=device,
+                    strategy="query_subset",
+                )
+                print(
+                    f"[Sampling] Prefix completion mode with observed prefix_len={prefix_len} "
+                    f"and query-subset context size={num_context}"
+                )
+            else:
+                max_context_train = int(self.max_timesteps * context_fraction)
+                num_context = max(1, min(trajectory_length - 1, max_context_train))
+                context_idx = self._build_sampling_context_indices(
+                    trajectory_length,
+                    num_context,
+                    device=device,
+                    strategy="prefix",
+                )
+                print(f"[Sampling] Context length: {num_context} (capped at {max_context_train} from training length {self.max_timesteps})")
 
         # Strategy1-only cached views reused across diffusion steps.
         strategy1_num_cands = max(2, int(guidance_num_candidates))
@@ -338,12 +487,13 @@ class TrajectoryDPFSampling:
 
         def _predict_eps_cfg(x_in: torch.Tensor, timestep_int: int, cond_in: torch.Tensor, cond_uncond_in: torch.Tensor) -> torch.Tensor:
             """Predict epsilon with optional CFG for arbitrary batch size."""
+            x_in = self._apply_observed_prefix_constraint(x_in, observed_prefix_state_norm, prefix_len)
             if self.unconditional_tau_in_state:
                 tokens = self.build_tokens(x_in, timestep_int + 1, skip_normalize=True)
                 with torch.no_grad():
                     if self.backbone == "transformer":
                         return self.model(tokens)
-                    contexts_local = tokens[:, :num_context, :]
+                    contexts_local = tokens.index_select(dim=1, index=context_idx)
                     return self.model(contexts_local, tokens, torque=None)
             if self.backbone == "transformer":
                 cond_tokens = self.build_tokens(
@@ -361,7 +511,7 @@ class TrajectoryDPFSampling:
                 return eps_cond_local
 
             queries_local = self.build_tokens(x_in, timestep_int + 1, skip_normalize=True)
-            contexts_local = queries_local[:, :num_context, :]
+            contexts_local = queries_local.index_select(dim=1, index=context_idx)
             with torch.no_grad():
                 eps_cond_local = self.model(contexts_local, queries_local, cond_in)
             if guidance_scale != 1.0:
@@ -463,6 +613,7 @@ class TrajectoryDPFSampling:
             return x_prev_cands[bidx, chosen]
 
         for i, t in enumerate(tqdm(ts, total=len(ts), desc="Sampling")):
+            x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
             t_int = int(t.item())
             eps = _predict_eps_cfg(x, t_int, cond, cond_uncond)
             
@@ -526,6 +677,7 @@ class TrajectoryDPFSampling:
                                 is_last_step=is_last,
                                 t_prev_local_int=t_prev_local,
                             ).detach()
+                        x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
                         continue
 
                     x0_phys = self.denormalize_state(x0)
@@ -570,8 +722,10 @@ class TrajectoryDPFSampling:
 
                 eps_coef = torch.sqrt(1.0 - a_bar_prev)
                 x = torch.sqrt(a_bar_prev) * x0 + eps_coef * eps
+                x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
 
         # Denormalize state
+        x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
         state = self.denormalize_state(x)
         if self.unconditional_tau_in_state:
             torque_tokens = state[:, :, self.qpos_dim + self.mom_dim:self.qpos_dim + self.mom_dim + self.torque_dim]

@@ -68,7 +68,7 @@ class TrajectoryDPFTraining:
         torque: Optional[torch.Tensor],
         diffusion_t: int,
         time_indices: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor, int, int]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor], int, int]:
         B, T, _ = state.shape
         clean_tokens = self.build_tokens(state, diffusion_t, time_indices=time_indices)
         noisy_tokens, noise = self.apply_noise(clean_tokens.clone(), diffusion_t, return_noise=True)
@@ -86,7 +86,73 @@ class TrajectoryDPFTraining:
         noisy_queries = noisy_tokens.index_select(dim=1, index=query_idx)
         noise_target = noise.index_select(dim=1, index=query_idx)
         cond = torque.index_select(dim=1, index=query_idx) if torque is not None else None
-        return noisy_contexts, noisy_queries, cond, noise_target, int(context_idx.numel()), int(query_idx.numel())
+        return noisy_contexts, noisy_queries, cond, noise_target, None, int(context_idx.numel()), int(query_idx.numel())
+
+    def _apply_state_noise_with_mask(
+        self,
+        clean_tokens: torch.Tensor,
+        diffusion_t: int,
+        state_noise_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Apply diffusion noise only where `state_noise_mask` is True.
+
+        Args:
+            clean_tokens: [B, T, C]
+            diffusion_t: diffusion timestep
+            state_noise_mask: [T] or [B, T] boolean mask over token positions
+        """
+        if state_noise_mask.ndim == 1:
+            state_noise_mask = state_noise_mask.unsqueeze(0).expand(clean_tokens.shape[0], -1)
+        if state_noise_mask.shape != clean_tokens.shape[:2]:
+            raise ValueError(
+                "state_noise_mask must match the [B,T] token layout: "
+                f"got {tuple(state_noise_mask.shape)} for tokens {tuple(clean_tokens.shape[:2])}"
+            )
+
+        mask = state_noise_mask.to(device=clean_tokens.device, dtype=torch.bool).unsqueeze(-1)
+        noisy_tokens = clean_tokens.clone()
+        clean_state = noisy_tokens[:, :, :self.state_dim]
+        noise = torch.randn_like(clean_state)
+
+        noisy_state = torch.where(
+            mask,
+            self.sqrt_alpha_cumprod[diffusion_t - 1] * clean_state +
+            self.sqrt_one_minus_alpha_cumprod[diffusion_t - 1] * noise,
+            clean_state,
+        )
+        noisy_tokens[:, :, :self.state_dim] = noisy_state
+        noise = noise * mask.to(dtype=noise.dtype)
+        return noisy_tokens, noise
+
+    def _build_clean_prefix_noisy_suffix_views(
+        self,
+        state: torch.Tensor,
+        torque: Optional[torch.Tensor],
+        diffusion_t: int,
+        time_indices: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor, torch.Tensor, int, int]:
+        """
+        Build query=[clean prefix, noisy suffix] and train only on the suffix.
+
+        Contexts are sampled as a subset of the query tokens.
+        """
+        _, T, _ = state.shape
+        clean_tokens = self.build_tokens(state, diffusion_t, time_indices=time_indices)
+
+        suffix_start = torch.randint(1, T, (1,), device=state.device).item() if T > 1 else 0
+        loss_mask = torch.zeros(T, device=state.device, dtype=torch.bool)
+        loss_mask[suffix_start:] = True
+        noisy_queries, noise = self._apply_state_noise_with_mask(
+            clean_tokens,
+            diffusion_t,
+            state_noise_mask=loss_mask,
+        )
+
+        num_context = torch.randint(1, T + 1, (1,), device=state.device).item()
+        context_idx = self._sample_subset_indices(T, num_context, state.device)
+        noisy_contexts = noisy_queries.index_select(dim=1, index=context_idx)
+        return noisy_contexts, noisy_queries, torque, noise, loss_mask, int(context_idx.numel()), T
 
     def _build_perceiver_train_views(
         self,
@@ -94,21 +160,24 @@ class TrajectoryDPFTraining:
         torque: Optional[torch.Tensor],
         diffusion_t: int,
         time_indices: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor, int, int]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor], int, int]:
         """
         Build Perceiver context/query tensors for training or validation.
 
         Returns:
-            contexts, queries, cond, noise_target, num_context, num_query
+            contexts, queries, cond, noise_target, loss_mask, num_context, num_query
         """
         B, T, _ = state.shape
         if time_indices is None:
             time_indices = torch.arange(T, device=state.device, dtype=torch.long)
 
+        if self.query_context_mode == "future_context":
+            return self._build_future_context_views(state, torque, diffusion_t, time_indices)
+        if self.query_context_mode == "clean_prefix_noisy_suffix":
+            return self._build_clean_prefix_noisy_suffix_views(state, torque, diffusion_t, time_indices)
+
         tokens = self.build_tokens(state, diffusion_t, time_indices=time_indices)
         noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
-        if self.training_context_mode == "future_context":
-            return self._build_future_context_views(state, torque, diffusion_t, time_indices)
 
         num_context = torch.randint(1, T + 1, (1,), device=state.device).item()
         num_query = torch.randint(1, T + 1, (1,), device=state.device).item()
@@ -119,25 +188,37 @@ class TrajectoryDPFTraining:
         noisy_queries = noisy_tokens.index_select(dim=1, index=query_idx)
         noise_target = noise.index_select(dim=1, index=query_idx)
         cond = torque.index_select(dim=1, index=query_idx) if torque is not None else None
-        return noisy_contexts, noisy_queries, cond, noise_target, num_context, num_query
+        return noisy_contexts, noisy_queries, cond, noise_target, None, num_context, num_query
 
     def _compute_denoise_loss(
         self,
         predictions: torch.Tensor,
         noise_target: torch.Tensor,
+        loss_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if loss_mask is not None:
+            if loss_mask.ndim == 1:
+                loss_mask = loss_mask.unsqueeze(0).expand(predictions.shape[0], -1)
+            if loss_mask.shape != predictions.shape[:2]:
+                raise ValueError(
+                    "loss_mask must match the [B,T] prediction layout: "
+                    f"got {tuple(loss_mask.shape)} for predictions {tuple(predictions.shape[:2])}"
+                )
+            weight = loss_mask.to(device=predictions.device, dtype=predictions.dtype).unsqueeze(-1)
+            sq_error = (predictions - noise_target) ** 2
+            denom = weight.sum() * predictions.shape[-1]
+            if denom <= 0:
+                raise ValueError("loss_mask selected zero tokens for denoising loss")
+            return (sq_error * weight).sum() / denom
         return F.mse_loss(predictions, noise_target)
 
     def training_step(self, batch, batch_idx):
-        """Training step with prefix context and CFG dropout."""
+        """Training step with optional concat-state torque or AdaLN torque conditioning."""
         # batch is a dict with keys: 'seq_qpos', 'seq_mom', 'seq_torque'
         qpos = batch['seq_qpos']  # [B, T, qpos_dim]
         mom = batch['seq_mom']    # [B, T, mom_dim]
         torque = batch['seq_torque']  # [B, T, torque_dim]
         
-        # State:
-        # - conditional mode: [qpos | mom]
-        # - unconditional mode: [qpos | mom | torque]
         if self.unconditional_tau_in_state:
             torque_tokens = self._shift_torque_sequence(torque) if self.use_shifted_tau_tokens else torque
             state = torch.cat([qpos, mom, torque_tokens], dim=-1)
@@ -167,13 +248,20 @@ class TrajectoryDPFTraining:
         
         if self.unconditional_tau_in_state:
             if self.backbone == "transformer":
-                tokens = self.build_tokens(state, diffusion_t)
-                noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+                tokens = self.build_tokens(state, diffusion_t, time_indices=time_indices)
+                if self.query_context_mode == "clean_prefix_noisy_suffix":
+                    loss_mask = torch.zeros(T_train, device=state.device, dtype=torch.bool)
+                    suffix_start = torch.randint(1, T_train, (1,), device=state.device).item() if T_train > 1 else 0
+                    loss_mask[suffix_start:] = True
+                    noisy_tokens, noise = self._apply_state_noise_with_mask(tokens, diffusion_t, loss_mask)
+                else:
+                    noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+                    loss_mask = None
                 predictions = self.model(noisy_tokens)
                 noise_target = noise
                 num_query = T_train
             else:
-                noisy_contexts, noisy_queries, _, noise_target, num_context, num_query = self._build_perceiver_train_views(
+                noisy_contexts, noisy_queries, _, noise_target, loss_mask, num_context, num_query = self._build_perceiver_train_views(
                     state, torque=None, diffusion_t=diffusion_t, time_indices=time_indices
                 )
                 predictions = self.model(noisy_contexts, noisy_queries, torque=None)
@@ -188,14 +276,21 @@ class TrajectoryDPFTraining:
 
             if self.backbone == "transformer":
                 tokens = self.build_tokens(
-                    state, diffusion_t, torque=torque_norm, include_torque=True
+                    state, diffusion_t, torque=torque_norm, include_torque=True, time_indices=time_indices
                 )
-                noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+                if self.query_context_mode == "clean_prefix_noisy_suffix":
+                    loss_mask = torch.zeros(T_train, device=state.device, dtype=torch.bool)
+                    suffix_start = torch.randint(1, T_train, (1,), device=state.device).item() if T_train > 1 else 0
+                    loss_mask[suffix_start:] = True
+                    noisy_tokens, noise = self._apply_state_noise_with_mask(tokens, diffusion_t, loss_mask)
+                else:
+                    noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+                    loss_mask = None
                 predictions = self.model(noisy_tokens)
                 noise_target = noise
                 num_query = T_train
             else:
-                noisy_contexts, noisy_queries, torque_for_queries, noise_target, num_context, num_query = (
+                noisy_contexts, noisy_queries, torque_for_queries, noise_target, loss_mask, num_context, num_query = (
                     self._build_perceiver_train_views(
                         state,
                         torque=torque_norm,
@@ -205,7 +300,7 @@ class TrajectoryDPFTraining:
                 )
                 predictions = self.model(noisy_contexts, noisy_queries, torque_for_queries)
             
-        loss_denoise = self._compute_denoise_loss(predictions, noise_target)
+        loss_denoise = self._compute_denoise_loss(predictions, noise_target, loss_mask=loss_mask)
         
         # ========== STABILITY: Skip NaN/Inf losses ==========
         if not torch.isfinite(loss_denoise):
@@ -235,7 +330,6 @@ class TrajectoryDPFTraining:
             torque_tokens = self._shift_torque_sequence(torque) if self.use_shifted_tau_tokens else torque
             state = torch.cat([qpos, mom, torque_tokens], dim=-1)
         else:
-            # State: [qpos | mom], Conditioning: torque (passed separately for AdaLN)
             state = torch.cat([qpos, mom], dim=-1)
         
         B, T, _ = state.shape
@@ -245,12 +339,19 @@ class TrajectoryDPFTraining:
         
         if self.unconditional_tau_in_state:
             if self.backbone == "transformer":
-                tokens = self.build_tokens(state, diffusion_t)
-                noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+                tokens = self.build_tokens(state, diffusion_t, time_indices=time_indices)
+                if self.query_context_mode == "clean_prefix_noisy_suffix":
+                    loss_mask = torch.zeros(T, device=state.device, dtype=torch.bool)
+                    suffix_start = torch.randint(1, T, (1,), device=state.device).item() if T > 1 else 0
+                    loss_mask[suffix_start:] = True
+                    noisy_tokens, noise = self._apply_state_noise_with_mask(tokens, diffusion_t, loss_mask)
+                else:
+                    noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+                    loss_mask = None
                 predictions = self.model(noisy_tokens)
                 noise_target = noise
             else:
-                noisy_contexts, noisy_queries, _, noise_target, _, _ = self._build_perceiver_train_views(
+                noisy_contexts, noisy_queries, _, noise_target, loss_mask, _, _ = self._build_perceiver_train_views(
                     state, torque=None, diffusion_t=diffusion_t, time_indices=time_indices
                 )
                 predictions = self.model(noisy_contexts, noisy_queries, torque=None)
@@ -260,13 +361,20 @@ class TrajectoryDPFTraining:
 
             if self.backbone == "transformer":
                 tokens = self.build_tokens(
-                    state, diffusion_t, torque=torque_norm, include_torque=True
+                    state, diffusion_t, torque=torque_norm, include_torque=True, time_indices=time_indices
                 )
-                noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+                if self.query_context_mode == "clean_prefix_noisy_suffix":
+                    loss_mask = torch.zeros(T, device=state.device, dtype=torch.bool)
+                    suffix_start = torch.randint(1, T, (1,), device=state.device).item() if T > 1 else 0
+                    loss_mask[suffix_start:] = True
+                    noisy_tokens, noise = self._apply_state_noise_with_mask(tokens, diffusion_t, loss_mask)
+                else:
+                    noisy_tokens, noise = self.apply_noise(tokens, diffusion_t, return_noise=True)
+                    loss_mask = None
                 predictions = self.model(noisy_tokens)
                 noise_target = noise
             else:
-                noisy_contexts, noisy_queries, torque_for_queries, noise_target, _, _ = (
+                noisy_contexts, noisy_queries, torque_for_queries, noise_target, loss_mask, _, _ = (
                     self._build_perceiver_train_views(
                         state,
                         torque=torque_norm,
@@ -275,7 +383,7 @@ class TrajectoryDPFTraining:
                     )
                 )
                 predictions = self.model(noisy_contexts, noisy_queries, torque_for_queries)
-        loss = self._compute_denoise_loss(predictions, noise_target)
+        loss = self._compute_denoise_loss(predictions, noise_target, loss_mask=loss_mask)
         
         # Log validation loss (epoch-level only)
         self.log('val_loss', loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)

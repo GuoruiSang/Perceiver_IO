@@ -66,7 +66,7 @@ class WandBTrajectoryCallback(pl.Callback):
             "horizon": horizon,
         }
 
-        state, rollout_torque = pl_module.sample_trajectories(
+        sample_kwargs = dict(
             num_samples=self.num_samples,
             trajectory_length=horizon,
             num_diffusion_steps=100,
@@ -78,6 +78,19 @@ class WandBTrajectoryCallback(pl.Callback):
             sampling_lpf_uniform_beta=self.sampling_lpf_uniform_beta,
             sampling_torque_scale=self.sampling_torque_scale,
         )
+        if getattr(pl_module, "query_context_mode", "random_subset") == "clean_prefix_noisy_suffix":
+            prefix_len = max(1, min(horizon - 1, int(round(0.5 * horizon))))
+            metadata["mode"] = "observed_prefix_completion"
+            metadata["prefix_len"] = prefix_len
+            sample_kwargs.update(
+                sample_mode="observed_prefix_completion",
+                prefix_len=prefix_len,
+                observed_qpos=qpos,
+                observed_mom=mom,
+                observed_torque=torque,
+            )
+
+        state, rollout_torque = pl_module.sample_trajectories(**sample_kwargs)
         return state, rollout_torque, metadata
 
     def on_validation_epoch_end(self, trainer, pl_module):
@@ -140,6 +153,7 @@ class WandBTrajectoryCallback(pl.Callback):
                             dt=pl_module.dt,
                             data_dt=pl_module.data_dt,
                             name="comparison",
+                            prefix_len=prefix_len,
                         )
                     faulthandler.cancel_dump_traceback_later()
                     plot_path = os.path.join(tmp_dir, "comparison.jpg")

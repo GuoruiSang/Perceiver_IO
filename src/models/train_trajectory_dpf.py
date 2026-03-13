@@ -99,17 +99,40 @@ def main():
                         help="Fixed trajectory length for non-DPF training (disables variable-length). "
                              "When set, all training samples use this exact length instead of random lengths from 100-1000.")
     parser.add_argument(
-        "--unconditional_tau_in_state",
-        action="store_true",
-        help="Train unconditional diffusion over full state [qpos|mom|torque] (no torque conditioning input).",
+        "--conditioning_mode",
+        type=str,
+        default="adaln_torque",
+        choices=["adaln_torque", "concat_torque_in_state"],
+        help="How torque enters the model: separate AdaLN conditioning or concatenated into the denoised state.",
     )
+    parser.add_argument(
+        "--query_context_mode",
+        type=str,
+        default="random_subset",
+        choices=["random_subset", "future_context", "clean_prefix_noisy_suffix"],
+        help="Perceiver training/validation query-context construction.",
+    )
+    parser.add_argument(
+        "--token_layout",
+        type=str,
+        default="aligned_tau",
+        choices=["aligned_tau", "shifted_tau"],
+        help="Token layout for concatenated-state torque: (state_t, tau_t) or (state_t, tau_{t-1}).",
+    )
+    parser.add_argument("--unconditional_tau_in_state", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--training_context_mode",
         type=str,
-        default="random_subset",
-        choices=["random_subset", "future_context", "shifted_tau_tokens"],
-        help="Perceiver training/validation context-query construction. "
-             "'shifted_tau_tokens' only shifts token pairing to (state_i, tau_{i-1}).",
+        default=None,
+        choices=[
+            "random_subset",
+            "future_context",
+            "clean_prefix_noisy_suffix",
+            "shifted_tau_tokens",
+            "shifted_future_context",
+            "shifted_future_context_cleanprefix",
+        ],
+        help=argparse.SUPPRESS,
     )
     
     # Training callback sampling parameters
@@ -146,6 +169,34 @@ def main():
     parser.add_argument("--wandb_run_name", type=str, default=config.DEFAULT_WANDB_RUN_NAME, help="W&B run name")
     
     args = parser.parse_args()
+
+    # Backward-compatible mapping from the old coupled flags onto the new orthogonal axes.
+    if args.unconditional_tau_in_state:
+        args.conditioning_mode = "concat_torque_in_state"
+
+    if args.training_context_mode is not None:
+        legacy_context_mode_map = {
+            "random_subset": ("random_subset", "aligned_tau", None),
+            "future_context": ("future_context", "aligned_tau", None),
+            "clean_prefix_noisy_suffix": ("clean_prefix_noisy_suffix", "aligned_tau", None),
+            "shifted_tau_tokens": ("random_subset", "shifted_tau", "concat_torque_in_state"),
+            "shifted_future_context": ("future_context", "shifted_tau", "concat_torque_in_state"),
+            "shifted_future_context_cleanprefix": (
+                "clean_prefix_noisy_suffix",
+                "shifted_tau",
+                "concat_torque_in_state",
+            ),
+        }
+        query_context_mode, token_layout, conditioning_mode = legacy_context_mode_map[args.training_context_mode]
+        args.query_context_mode = query_context_mode
+        args.token_layout = token_layout
+        if conditioning_mode is not None:
+            args.conditioning_mode = conditioning_mode
+
+    if args.token_layout == "shifted_tau" and args.conditioning_mode != "concat_torque_in_state":
+        raise ValueError(
+            "--token_layout shifted_tau is only valid when --conditioning_mode=concat_torque_in_state"
+        )
 
     # Speed knobs for modern NVIDIA GPUs (A100 etc.)
     # - TF32 accelerates float32 matmuls on Tensor Cores with negligible impact for most training.
@@ -185,8 +236,9 @@ def main():
     print(f"  qpos_dim: {qpos_dim}, mom_dim: {mom_dim}, torque_dim: {torque_dim}")
     print(f"  dt: {dt}, data_dt: {data_dt}")
     print(f"  XML content: {'loaded' if xml_content else 'not available'}")
-    print(f"  unconditional_tau_in_state: {args.unconditional_tau_in_state}")
-    print(f"  training_context_mode: {args.training_context_mode}")
+    print(f"  conditioning_mode: {args.conditioning_mode}")
+    print(f"  query_context_mode: {args.query_context_mode}")
+    print(f"  token_layout: {args.token_layout}")
     
     # Create dataloaders:
     # - If val_h5_path is provided, keep strict split across files.
@@ -263,10 +315,7 @@ def main():
             print(f"[Visualization] Warning: {src_path} not found, skipping rename", flush=True)
         
         # Normalize the trajectory
-        # State:
-        # - conditional mode: [qpos | mom]
-        # - unconditional mode: [qpos | mom | torque]
-        if args.unconditional_tau_in_state:
+        if args.conditioning_mode == "concat_torque_in_state":
             state_min = torch.cat([qpos_min, mom_min, torque_min], dim=-1)
             state_max = torch.cat([qpos_max, mom_max, torque_max], dim=-1)
         else:
@@ -274,8 +323,12 @@ def main():
             state_max = torch.cat([qpos_max, mom_max], dim=-1)
         state_range = state_max - state_min
         
-        if args.unconditional_tau_in_state:
-            full_state = torch.cat([sample_qpos, sample_mom, sample_torque], dim=-1)  # [T, state_dim]
+        if args.conditioning_mode == "concat_torque_in_state":
+            sample_torque_state = sample_torque
+            if args.token_layout == "shifted_tau":
+                zero_torque = torch.zeros_like(sample_torque[:1, :])
+                sample_torque_state = torch.cat([zero_torque, sample_torque[:-1, :]], dim=0)
+            full_state = torch.cat([sample_qpos, sample_mom, sample_torque_state], dim=-1)  # [T, state_dim]
         else:
             full_state = torch.cat([sample_qpos, sample_mom], dim=-1)  # [T, state_dim]
         normalized_state = (full_state - state_min) / state_range * 2.0 - 1.0
@@ -331,8 +384,9 @@ def main():
         use_fused_adamw=args.use_fused_adamw,
         encoder_cond_mode="none",  # Encoder conditioning: "per_step", "mean", "rnn" or "none"
         backbone=args.backbone,
-        unconditional_tau_in_state=args.unconditional_tau_in_state,
-        training_context_mode=args.training_context_mode,
+        conditioning_mode=args.conditioning_mode,
+        query_context_mode=args.query_context_mode,
+        token_layout=args.token_layout,
         dt=dt,
         data_dt=data_dt,
         xml_content=xml_content,
@@ -372,11 +426,15 @@ def main():
                     wandb_run_name = f"{wandb_run_name}_FixedTrajLength{args.fixed_trajectory_length}" if wandb_run_name else f"FixedTrajLength{args.fixed_trajectory_length}"
             if args.backbone == "transformer":
                 wandb_run_name = f"{wandb_run_name}_backbone-transformer" if wandb_run_name else "backbone-transformer"
-            if args.unconditional_tau_in_state:
-                wandb_run_name = f"{wandb_run_name}_uncond-qpt" if wandb_run_name else "uncond-qpt"
-            if args.training_context_mode != "random_subset":
-                ctx_tag = f"ctxMode-{args.training_context_mode}"
+            if args.conditioning_mode != "adaln_torque":
+                cond_tag = f"cond-{args.conditioning_mode}"
+                wandb_run_name = f"{wandb_run_name}_{cond_tag}" if wandb_run_name else cond_tag
+            if args.query_context_mode != "random_subset":
+                ctx_tag = f"ctxMode-{args.query_context_mode}"
                 wandb_run_name = f"{wandb_run_name}_{ctx_tag}" if wandb_run_name else ctx_tag
+            if args.token_layout != "aligned_tau":
+                layout_tag = f"layout-{args.token_layout}"
+                wandb_run_name = f"{wandb_run_name}_{layout_tag}" if wandb_run_name else layout_tag
             logger = WandbLogger(
                 project=args.wandb_project,
                 name=wandb_run_name,
@@ -416,8 +474,9 @@ def main():
                 'diffusion_steps': args.diffusion_steps,
                 'epochs': args.epochs,
                 'backbone': args.backbone,
-                'unconditional_tau_in_state': args.unconditional_tau_in_state,
-                'training_context_mode': args.training_context_mode,
+                'conditioning_mode': args.conditioning_mode,
+                'query_context_mode': args.query_context_mode,
+                'token_layout': args.token_layout,
                 'fixed_trajectory_length': args.fixed_trajectory_length,
                 'trajectory_length_training_options': list(traj_length_options),
             })
@@ -428,11 +487,16 @@ def main():
     callbacks = []
     
     backbone_tag = "_backbone-transformer" if args.backbone == "transformer" else ""
-    unconditional_tag = "_uncond-qpt" if args.unconditional_tau_in_state else ""
+    conditioning_tag = (
+        f"_cond-{args.conditioning_mode}"
+        if args.conditioning_mode != "adaln_torque"
+        else ""
+    )
+    layout_tag = f"_layout-{args.token_layout}" if args.token_layout != "aligned_tau" else ""
     length_tag = f"FixedTrajLength{args.fixed_trajectory_length}" if args.fixed_trajectory_length else "VariableTrajLength"
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename=f'trajectory_dpf_x0Stabilized&AbsoluteTimeEncoding&{length_tag}&UniformContext&EncoderNone&DecoderAttentions{backbone_tag}{unconditional_tag}:{{epoch:03d}}_val_loss:{{val_loss:.4f}}',
+        filename=f'trajectory_dpf_x0Stabilized&AbsoluteTimeEncoding&{length_tag}&UniformContext&EncoderNone&DecoderAttentions{backbone_tag}{conditioning_tag}{layout_tag}:{{epoch:03d}}_val_loss:{{val_loss:.4f}}',
         every_n_epochs=args.checkpoint_every_n_epochs,
     )
     callbacks.append(checkpoint_callback)
@@ -459,12 +523,12 @@ def main():
         torch.cuda.is_available()
         and len(args.devices) > 1
         and args.backbone == "perceiverio"
-        and args.unconditional_tau_in_state
+        and args.conditioning_mode == "concat_torque_in_state"
     ):
-        # In unconditional Perceiver mode, torque-conditioning submodules are intentionally unused.
+        # In concat-state Perceiver mode, torque-conditioning submodules are intentionally unused.
         # DDP needs find_unused_parameters=True to avoid bucket rebuild failures.
         trainer_strategy = "ddp_find_unused_parameters_true"
-        print("[Trainer] Using strategy=ddp_find_unused_parameters_true for unconditional PerceiverIO multi-GPU.")
+        print("[Trainer] Using strategy=ddp_find_unused_parameters_true for concat-state PerceiverIO multi-GPU.")
 
     trainer = pl.Trainer(
         max_epochs=args.epochs,

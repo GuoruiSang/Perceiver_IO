@@ -68,8 +68,11 @@ class TrajectoryDPF(TrajectoryDPFSampling, TrajectoryDPFTraining, pl.LightningMo
         p_uncond: float = 0.1,  # Probability of dropping conditioning for CFG
         encoder_cond_mode: str = "none",  # "per_step", "mean", "rnn" or "none" for encoder conditioning
         backbone: str = "perceiverio",  # "perceiverio" or "transformer"
-        unconditional_tau_in_state: bool = False,  # If True, model denoises [qpos|mom|torque] unconditionally
-        training_context_mode: str = "random_subset",  # "random_subset", "future_context", or shifted-token mode
+        conditioning_mode: str = "adaln_torque",
+        query_context_mode: str = "random_subset",
+        token_layout: str = "aligned_tau",
+        unconditional_tau_in_state: Optional[bool] = None,  # Legacy alias for concat_torque_in_state
+        training_context_mode: Optional[str] = None,  # Legacy alias for query_context_mode + token_layout
         # Simulation metadata (loaded from dataset)
         dt: float = 0.0001,  # Fine simulation timestep
         data_dt: float = 0.0002,  # Data collection timestep (skip_steps * dt = 2 * 0.0001)
@@ -83,13 +86,58 @@ class TrajectoryDPF(TrajectoryDPFSampling, TrajectoryDPFTraining, pl.LightningMo
         torque_max: Optional[torch.Tensor] = None,
     ):
         super().__init__()
-        self.save_hyperparameters()
+
+        if unconditional_tau_in_state is not None:
+            conditioning_mode = (
+                "concat_torque_in_state" if bool(unconditional_tau_in_state) else "adaln_torque"
+            )
+
+        if training_context_mode is not None:
+            legacy_context_mode_map = {
+                "random_subset": ("random_subset", "aligned_tau", None),
+                "future_context": ("future_context", "aligned_tau", None),
+                "clean_prefix_noisy_suffix": ("clean_prefix_noisy_suffix", "aligned_tau", None),
+                "shifted_tau_tokens": ("random_subset", "shifted_tau", "concat_torque_in_state"),
+                "shifted_future_context": ("future_context", "shifted_tau", "concat_torque_in_state"),
+                "shifted_future_context_cleanprefix": (
+                    "clean_prefix_noisy_suffix",
+                    "shifted_tau",
+                    "concat_torque_in_state",
+                ),
+            }
+            if training_context_mode not in legacy_context_mode_map:
+                raise ValueError(f"Unsupported legacy training_context_mode: {training_context_mode}")
+            query_context_mode, token_layout, legacy_conditioning_mode = legacy_context_mode_map[training_context_mode]
+            if legacy_conditioning_mode is not None:
+                conditioning_mode = legacy_conditioning_mode
+
+        if conditioning_mode not in {"adaln_torque", "concat_torque_in_state"}:
+            raise ValueError(f"Unsupported conditioning_mode: {conditioning_mode}")
+        if query_context_mode not in {
+            "random_subset",
+            "future_context",
+            "clean_prefix_noisy_suffix",
+        }:
+            raise ValueError(f"Unsupported query_context_mode: {query_context_mode}")
+        if token_layout not in {"aligned_tau", "shifted_tau"}:
+            raise ValueError(f"Unsupported token_layout: {token_layout}")
+        if token_layout == "shifted_tau" and conditioning_mode != "concat_torque_in_state":
+            raise ValueError(
+                "token_layout='shifted_tau' is only supported with conditioning_mode='concat_torque_in_state'."
+            )
+
+        self.save_hyperparameters(ignore=["unconditional_tau_in_state", "training_context_mode"])
         
         self.qpos_dim = qpos_dim
         self.mom_dim = mom_dim
         self.torque_dim = torque_dim
-        self.unconditional_tau_in_state = bool(unconditional_tau_in_state)
-        self.state_dim = qpos_dim + mom_dim + (torque_dim if self.unconditional_tau_in_state else 0)
+        self.conditioning_mode = conditioning_mode
+        self.query_context_mode = query_context_mode
+        self.token_layout = token_layout
+        self.torque_in_state = conditioning_mode == "concat_torque_in_state"
+        self.use_adaln_conditioning = conditioning_mode == "adaln_torque"
+        self.unconditional_tau_in_state = self.torque_in_state  # Backward-compatible internal alias.
+        self.state_dim = qpos_dim + mom_dim + (torque_dim if self.torque_in_state else 0)
         self.adaln_cond_dim = cond_dim  # Conditioning embedding dimension for AdaLN
         self.num_decoder_blocks = num_decoder_blocks
         self.max_timesteps = max_timesteps
@@ -105,27 +153,12 @@ class TrajectoryDPF(TrajectoryDPFSampling, TrajectoryDPFTraining, pl.LightningMo
         self.p_uncond = p_uncond  # CFG dropout probability
         self.encoder_cond_mode = encoder_cond_mode
         self.backbone = backbone
-        legacy_context_mode_map = {
-            "shifted_future_context": "shifted_tau_tokens",
-            "shifted_future_context_cleanprefix": "shifted_tau_tokens",
-        }
-        training_context_mode = legacy_context_mode_map.get(training_context_mode, training_context_mode)
-        if training_context_mode not in {
-            "random_subset",
-            "future_context",
-            "shifted_tau_tokens",
-        }:
-            raise ValueError(f"Unsupported training_context_mode: {training_context_mode}")
-        if training_context_mode == "shifted_tau_tokens" and not self.unconditional_tau_in_state:
-            raise ValueError(
-                f"training_context_mode={training_context_mode!r} requires unconditional_tau_in_state=True."
-            )
-        self.training_context_mode = training_context_mode
-        self.use_shifted_tau_tokens = training_context_mode == "shifted_tau_tokens"
+        self.training_context_mode = query_context_mode  # Backward-compatible alias for helper code.
+        self.use_shifted_tau_tokens = self.torque_in_state and token_layout == "shifted_tau"
         if self.use_shifted_tau_tokens:
             print(
-                "[Init] Using shifted tau tokens only: state_i pairs with tau_{i-1}; "
-                "context/query construction stays on the generic path."
+                "[Init] Using shifted tau token layout: state_i pairs with tau_{i-1} "
+                "when torque is concatenated into state."
             )
 
         # Simulation metadata for physics-consistent sampling
