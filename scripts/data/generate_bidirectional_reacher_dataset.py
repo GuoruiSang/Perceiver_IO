@@ -428,7 +428,9 @@ def generate_split(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate bidirectional non-dissipative Reacher HDF5 datasets")
     parser.add_argument(
+        "--output_dir",
         "--save_dir",
+        dest="output_dir",
         type=str,
         default="/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_dt0p001_len1000",
     )
@@ -437,42 +439,44 @@ def main() -> None:
         type=str,
         default="/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_from_dataset.xml",
     )
-    parser.add_argument("--num_trajectories", type=int, default=40000)
-    parser.add_argument("--num_val", type=int, default=2000)
+    parser.add_argument("--train_trajectories", "--num_trajectories", dest="train_trajectories", type=int, default=40000)
+    parser.add_argument("--val_trajectories", "--num_val", dest="val_trajectories", type=int, default=2000)
     parser.add_argument("--trajectory_length", type=int, default=1000)
     parser.add_argument("--dt", type=float, default=0.001)
     parser.add_argument("--waypoint_radius", type=float, default=0.18)
     parser.add_argument("--waypoint_qvel_scale", type=float, default=0.8)
-    parser.add_argument("--torque_scale", type=float, default=0.7)
+    parser.add_argument("--torque_scale", type=float, default=0.2)
     parser.add_argument("--waypoint_tolerance", type=float, default=0.01)
     parser.add_argument("--max_abs_qvel", type=float, default=200.0)
-    parser.add_argument("--max_abs_qacc", type=float, default=20000.0)
+    parser.add_argument("--max_abs_qacc", type=float, default=10000.0)
     parser.add_argument("--num_workers", type=int, default=24)
     parser.add_argument("--batch_size", type=int, default=256)
     args = parser.parse_args()
 
-    save_dir = Path(args.save_dir)
-    train_path = save_dir / f"traj_{args.num_trajectories}-steps_{args.trajectory_length}.h5"
-    val_path = save_dir / f"traj_{args.num_val}-steps_{args.trajectory_length}.h5"
+    output_dir = Path(args.output_dir)
+    train_path = output_dir / f"traj_{args.train_trajectories}-steps_{args.trajectory_length}.h5"
+    val_path = output_dir / f"traj_{args.val_trajectories}-steps_{args.trajectory_length}.h5"
 
     print("Configuration:", flush=True)
-    print(f"  save_dir: {save_dir}", flush=True)
+    print(f"  output_dir: {output_dir}", flush=True)
     print(f"  xml_path: {args.xml_path}", flush=True)
     print(f"  dt: {args.dt}", flush=True)
     print(f"  trajectory_length: {args.trajectory_length}", flush=True)
-    print(f"  train trajectories: {args.num_trajectories}", flush=True)
-    print(f"  val trajectories: {args.num_val}", flush=True)
+    print(f"  train trajectories: {args.train_trajectories}", flush=True)
+    print(f"  val trajectories: {args.val_trajectories}", flush=True)
     print(f"  waypoint_radius: {args.waypoint_radius}", flush=True)
     print(f"  waypoint_qvel_scale: {args.waypoint_qvel_scale}", flush=True)
     print(f"  torque_scale: {args.torque_scale}", flush=True)
     print(f"  waypoint_tolerance: {args.waypoint_tolerance}", flush=True)
+    print(f"  max_abs_qvel: {args.max_abs_qvel}", flush=True)
+    print(f"  max_abs_qacc: {args.max_abs_qacc}", flush=True)
     print(f"  num_workers: {args.num_workers}", flush=True)
     print(f"  batch_size: {args.batch_size}", flush=True)
 
     generate_split(
         output_path=train_path,
         xml_path=args.xml_path,
-        num_trajectories=args.num_trajectories,
+        num_trajectories=args.train_trajectories,
         trajectory_length=args.trajectory_length,
         dt=args.dt,
         waypoint_radius=args.waypoint_radius,
@@ -487,11 +491,11 @@ def main() -> None:
         split_name="train",
     )
 
-    if args.num_val > 0:
+    if args.val_trajectories > 0:
         generate_split(
             output_path=val_path,
             xml_path=args.xml_path,
-            num_trajectories=args.num_val,
+            num_trajectories=args.val_trajectories,
             trajectory_length=args.trajectory_length,
             dt=args.dt,
             waypoint_radius=args.waypoint_radius,

@@ -42,11 +42,11 @@ The command below reproduces the train/val datasets created for the current bidi
   --dt 0.001 \
   --waypoint_radius 0.18 \
   --waypoint_qvel_scale 0.8 \
-  --torque_scale 0.7 \
+  --torque_scale 0.2 \
   --waypoint_tolerance 0.01 \
   --max_abs_qvel 200 \
-  --max_abs_qacc 20000 \
-  --num_workers 8 \
+  --max_abs_qacc 10000 \
+  --num_workers 24 \
   --batch_size 256
 ```
 
@@ -135,7 +135,7 @@ To inspect the same configuration visually:
   --dt 0.001 \
   --waypoint_radius 0.18 \
   --waypoint_qvel_scale 0.8 \
-  --torque_scale 0.7 \
+  --torque_scale 0.2 \
   --show_stats
 ```
 
