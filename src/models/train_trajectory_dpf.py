@@ -78,6 +78,8 @@ def main():
                         help="Save model checkpoint every N epochs.")
     parser.add_argument("--disable_wandb_traj_callback", action="store_true",
                         help="Disable expensive WandB trajectory image callback during training.")
+    parser.add_argument("--wandb_traj_log_every_n_epochs", type=int, default=10,
+                        help="Log the W&B trajectory image callback every N validation epochs.")
     parser.add_argument("--disable_startup_visualization", action="store_true",
                         help="Skip the pre-training debug trajectory plots saved under plots/training_debug.")
     parser.add_argument("--compile_model", action="store_true",
@@ -466,6 +468,7 @@ def main():
                 'num_sanity_val_steps': args.num_sanity_val_steps,
                 'checkpoint_every_n_epochs': args.checkpoint_every_n_epochs,
                 'disable_wandb_traj_callback': args.disable_wandb_traj_callback,
+                'wandb_traj_log_every_n_epochs': args.wandb_traj_log_every_n_epochs,
                 'compile_model': args.compile_model,
                 'compile_mode': args.compile_mode,
                 'num_latents': args.num_latents,
@@ -504,7 +507,7 @@ def main():
     # Add W&B trajectory logging callback if W&B is enabled
     if args.wandb and WANDB_AVAILABLE and not args.disable_wandb_traj_callback:
         wandb_traj_callback = WandBTrajectoryCallback(
-            log_every_n_epochs=1,  # TEMP: immediate callback verification after matplotlib backend fix
+            log_every_n_epochs=max(1, args.wandb_traj_log_every_n_epochs),
             num_samples=1,
             sampling_torque_policy=args.sampling_torque_policy,
             sampling_torque_mix=args.sampling_torque_mix,
