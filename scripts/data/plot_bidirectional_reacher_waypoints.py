@@ -127,17 +127,21 @@ def simulate_segment(
 def build_bidirectional_example(
     model: mujoco.MjModel,
     rng: np.random.Generator,
-    prefix_steps: int,
-    suffix_steps: int,
+    trajectory_length: int,
     waypoint_radius: float,
     waypoint_qvel_scale: float,
     torque_scale: float,
     fingertip_body_id: int,
 ) -> dict:
+    if trajectory_length < 3:
+        raise ValueError("trajectory_length must be at least 3 so prefix, waypoint, suffix all exist")
+
     waypoint_xy = sample_waypoint_in_disk(rng, max_radius=waypoint_radius)
     elbow_branch = 1 if rng.random() < 0.5 else -1
     arm_qpos = ik_2link(waypoint_xy, elbow_branch=elbow_branch)
     arm_qvel = rng.uniform(-waypoint_qvel_scale, waypoint_qvel_scale, size=2)
+    prefix_steps = int(rng.integers(1, trajectory_length - 1))
+    suffix_steps = int(trajectory_length - 1 - prefix_steps)
 
     prefix_helper_tau = generate_smooth_torque(rng, prefix_steps, model.opt.timestep, model.nu, torque_scale)
     suffix_tau = generate_smooth_torque(rng, suffix_steps, model.opt.timestep, model.nu, torque_scale)
@@ -178,9 +182,22 @@ def build_bidirectional_example(
         "full_qpos": full_qpos,
         "full_qvel": full_qvel,
         "waypoint_index": waypoint_index,
+        "prefix_steps": prefix_steps,
+        "suffix_steps": suffix_steps,
+        "prefix_tau": prefix_helper_tau,
+        "suffix_tau": suffix_tau,
         "start_xy": full_xy[0],
         "end_xy": full_xy[-1],
     }
+
+
+def _draw_workspace_guides(ax: plt.Axes) -> None:
+    ax.add_patch(plt.Circle((0.0, 0.0), L1 + L2, color="#bbbbbb", fill=False, linestyle="--", linewidth=1.0))
+    ax.add_patch(plt.Circle((0.0, 0.0), abs(L1 - L2), color="#dddddd", fill=False, linestyle=":", linewidth=1.0))
+    ax.set_aspect("equal")
+    ax.grid(alpha=0.25)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
 
 
 def plot_examples(examples: list[dict], save_path: Path) -> None:
@@ -190,45 +207,25 @@ def plot_examples(examples: list[dict], save_path: Path) -> None:
     fig, axes = plt.subplots(nrows, ncols, figsize=(7.2 * ncols, 6.5 * nrows), dpi=180)
     axes = np.atleast_1d(axes).reshape(nrows, ncols)
 
-    outer = plt.Circle((0.0, 0.0), L1 + L2, color="#bbbbbb", fill=False, linestyle="--", linewidth=1.0)
-    inner = plt.Circle((0.0, 0.0), abs(L1 - L2), color="#dddddd", fill=False, linestyle=":", linewidth=1.0)
-    target_disk = plt.Circle((0.0, 0.0), 0.20, color="#f2d6a2", fill=False, linestyle="-.", linewidth=1.0)
-
     for ax, example in zip(axes.flat, examples):
-        ax.add_patch(plt.Circle((0.0, 0.0), L1 + L2, color="#bbbbbb", fill=False, linestyle="--", linewidth=1.0))
-        ax.add_patch(plt.Circle((0.0, 0.0), abs(L1 - L2), color="#dddddd", fill=False, linestyle=":", linewidth=1.0))
-        ax.add_patch(plt.Circle((0.0, 0.0), 0.20, color="#f2d6a2", fill=False, linestyle="-.", linewidth=1.0))
+        _draw_workspace_guides(ax)
 
         prefix_xy = example["prefix_xy"]
         suffix_xy = example["suffix_xy"]
         waypoint_xy = example["waypoint_xy"]
-        start_xy = example["start_xy"]
-        end_xy = example["end_xy"]
 
         ax.plot(prefix_xy[:, 0], prefix_xy[:, 1], color="#2a6f97", linewidth=2.0, label="prefix")
         ax.plot(suffix_xy[:, 0], suffix_xy[:, 1], color="#ee6c4d", linewidth=2.0, label="suffix")
-        ax.scatter(start_xy[0], start_xy[1], color="#1d3557", s=55, marker="o", label="start")
-        ax.scatter(end_xy[0], end_xy[1], color="#6d597a", s=55, marker="s", label="end")
         ax.scatter(waypoint_xy[0], waypoint_xy[1], color="#d62828", s=140, marker="*", label="waypoint", zorder=5)
 
         ax.set_title(
-            "waypoint=({:.3f}, {:.3f})  start=({:.3f}, {:.3f})  end=({:.3f}, {:.3f})".format(
+            "waypoint=({:.3f}, {:.3f})".format(
                 waypoint_xy[0],
                 waypoint_xy[1],
-                start_xy[0],
-                start_xy[1],
-                end_xy[0],
-                end_xy[1],
             ),
             fontsize=9.5,
         )
-        ax.set_aspect("equal")
-        ax.set_xlim(-0.23, 0.23)
-        ax.set_ylim(-0.23, 0.23)
-        ax.grid(alpha=0.25)
         ax.legend(loc="upper right", fontsize=8)
-        ax.set_xlabel("x")
-        ax.set_ylabel("y")
 
     for ax in axes.flat[len(examples):]:
         ax.axis("off")
@@ -238,6 +235,156 @@ def plot_examples(examples: list[dict], save_path: Path) -> None:
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
+
+
+def plot_overlay(examples: list[dict], save_path: Path) -> None:
+    fig, ax = plt.subplots(figsize=(8.2, 8.2), dpi=220)
+    _draw_workspace_guides(ax)
+
+    all_points = np.concatenate([example["full_xy"] for example in examples], axis=0)
+    all_waypoints = np.array([example["waypoint_xy"] for example in examples], dtype=np.float64)
+
+    for example in examples:
+        xy = example["full_xy"]
+        ax.plot(xy[:, 0], xy[:, 1], color="#2a6f97", alpha=0.14, linewidth=0.9)
+
+    ax.scatter(all_waypoints[:, 0], all_waypoints[:, 1], s=18, color="#d62828", alpha=0.65, marker="*", label="waypoints")
+    ax.set_title(
+        "Bidirectional non-dissipative Reacher overlay: {} trajectories".format(len(examples)),
+        fontsize=13,
+    )
+    ax.legend(loc="upper right", fontsize=9)
+    fig.tight_layout()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_overlay_with_torque(examples: list[dict], save_path: Path) -> None:
+    fig = plt.figure(figsize=(14.0, 8.0), dpi=220)
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.45, 1.0], height_ratios=[1.0, 1.0], wspace=0.18, hspace=0.18)
+    ax_xy = fig.add_subplot(gs[:, 0])
+    ax_tau0 = fig.add_subplot(gs[0, 1])
+    ax_tau1 = fig.add_subplot(gs[1, 1], sharex=ax_tau0)
+
+    _draw_workspace_guides(ax_xy)
+    all_waypoints = np.array([example["waypoint_xy"] for example in examples], dtype=np.float64)
+
+    prefix_color = "#2a6f97"
+    suffix_color = "#ee6c4d"
+
+    for example in examples:
+        prefix_xy = example["prefix_xy"]
+        suffix_xy = example["suffix_xy"]
+        ax_xy.plot(prefix_xy[:, 0], prefix_xy[:, 1], color=prefix_color, alpha=0.05, linewidth=0.7)
+        ax_xy.plot(suffix_xy[:, 0], suffix_xy[:, 1], color=suffix_color, alpha=0.05, linewidth=0.7)
+
+        prefix_steps = example["prefix_steps"]
+        suffix_steps = example["suffix_steps"]
+        prefix_t = np.arange(prefix_steps, dtype=np.int32)
+        suffix_t = np.arange(prefix_steps, prefix_steps + suffix_steps, dtype=np.int32)
+        prefix_tau = example["prefix_tau"]
+        suffix_tau = example["suffix_tau"]
+
+        ax_tau0.plot(prefix_t, prefix_tau[:, 0], color=prefix_color, alpha=0.025, linewidth=0.6)
+        ax_tau0.plot(suffix_t, suffix_tau[:, 0], color=suffix_color, alpha=0.025, linewidth=0.6)
+        ax_tau1.plot(prefix_t, prefix_tau[:, 1], color=prefix_color, alpha=0.025, linewidth=0.6)
+        ax_tau1.plot(suffix_t, suffix_tau[:, 1], color=suffix_color, alpha=0.025, linewidth=0.6)
+
+    ax_xy.scatter(all_waypoints[:, 0], all_waypoints[:, 1], s=8, color="#d62828", alpha=0.30, marker="*", label="waypoints")
+    ax_xy.set_title(f"Task-Space Overlay: {len(examples)} trajectories", fontsize=13)
+    ax_xy.legend(loc="upper right", fontsize=9)
+
+    ax_tau0.set_title("Torque dim 0", fontsize=12)
+    ax_tau1.set_title("Torque dim 1", fontsize=12)
+    ax_tau0.set_ylabel("tau[0]")
+    ax_tau1.set_ylabel("tau[1]")
+    ax_tau1.set_xlabel("timestep")
+    ax_tau0.grid(alpha=0.25)
+    ax_tau1.grid(alpha=0.25)
+    ax_tau0.plot([], [], color=prefix_color, label="prefix")
+    ax_tau0.plot([], [], color=suffix_color, label="suffix")
+    ax_tau0.legend(loc="upper right", fontsize=9)
+
+    fig.suptitle("Bidirectional non-dissipative Reacher: positions and torques", fontsize=15)
+    fig.tight_layout()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def print_trajectory_stats(examples: list[dict], dt: float) -> None:
+    waypoint_xy = np.array([example["waypoint_xy"] for example in examples], dtype=np.float64)
+    waypoint_radius = np.linalg.norm(waypoint_xy, axis=1)
+    prefix_steps = np.array([example["prefix_steps"] for example in examples], dtype=np.int32)
+    suffix_steps = np.array([example["suffix_steps"] for example in examples], dtype=np.int32)
+    waypoint_index = np.array([example["waypoint_index"] for example in examples], dtype=np.int32)
+
+    full_xy = np.concatenate([example["full_xy"] for example in examples], axis=0)
+    full_radius = np.linalg.norm(full_xy, axis=1)
+    all_torque = np.concatenate(
+        [
+            np.concatenate([example["prefix_tau"], example["suffix_tau"]], axis=0)
+            for example in examples
+        ],
+        axis=0,
+    )
+
+    print("---- Trajectory Statistics ----", flush=True)
+    print(f"num_examples: {len(examples)}", flush=True)
+    print(f"dt: {dt:.6f}", flush=True)
+    print(f"trajectory_length: {examples[0]['full_xy'].shape[0]}", flush=True)
+    print(
+        "prefix_steps: min={} mean={:.2f} max={}".format(
+            int(prefix_steps.min()), float(prefix_steps.mean()), int(prefix_steps.max())
+        ),
+        flush=True,
+    )
+    print(
+        "suffix_steps: min={} mean={:.2f} max={}".format(
+            int(suffix_steps.min()), float(suffix_steps.mean()), int(suffix_steps.max())
+        ),
+        flush=True,
+    )
+    print(
+        "waypoint_index: min={} mean={:.2f} max={}".format(
+            int(waypoint_index.min()), float(waypoint_index.mean()), int(waypoint_index.max())
+        ),
+        flush=True,
+    )
+    print(
+        "waypoint_radius: min={:.4f} mean={:.4f} max={:.4f}".format(
+            float(waypoint_radius.min()), float(waypoint_radius.mean()), float(waypoint_radius.max())
+        ),
+        flush=True,
+    )
+    print(
+        "visited_radius: min={:.4f} mean={:.4f} max={:.4f}".format(
+            float(full_radius.min()), float(full_radius.mean()), float(full_radius.max())
+        ),
+        flush=True,
+    )
+    print(
+        "x_range: [{:.4f}, {:.4f}]".format(float(full_xy[:, 0].min()), float(full_xy[:, 0].max())),
+        flush=True,
+    )
+    print(
+        "y_range: [{:.4f}, {:.4f}]".format(float(full_xy[:, 1].min()), float(full_xy[:, 1].max())),
+        flush=True,
+    )
+    for dim in range(all_torque.shape[1]):
+        tau = all_torque[:, dim]
+        print(
+            "tau[{}]: min={:.4f} mean={:.4f} std={:.4f} max={:.4f}".format(
+                dim,
+                float(tau.min()),
+                float(tau.mean()),
+                float(tau.std()),
+                float(tau.max()),
+            ),
+            flush=True,
+        )
+    print("-------------------------------", flush=True)
 
 
 def main() -> None:
@@ -257,16 +404,20 @@ def main() -> None:
         type=str,
         default="/home/gsang/Projects/hnn_guided_dpf/plots/bidirectional_reacher_waypoint_examples.json",
     )
-    parser.add_argument("--num_examples", type=int, default=4)
-    parser.add_argument("--prefix_steps", type=int, default=180)
-    parser.add_argument("--suffix_steps", type=int, default=180)
+    parser.add_argument("--num_examples", type=int, default=1000)
+    parser.add_argument("--plot_mode", type=str, choices=("grid", "overlay", "overlay_with_torque"), default="overlay_with_torque")
+    parser.add_argument("--dt", type=float, default=0.001)
+    parser.add_argument("--show_stats", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--trajectory_length", type=int, default=1000)
     parser.add_argument("--waypoint_radius", type=float, default=0.18)
     parser.add_argument("--waypoint_qvel_scale", type=float, default=0.8)
-    parser.add_argument("--torque_scale", type=float, default=0.07)
+    parser.add_argument("--torque_scale", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
 
     model = mujoco.MjModel.from_xml_path(args.xml_path)
+    if args.dt is not None:
+        model.opt.timestep = float(args.dt)
     fingertip_body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "fingertip")
     rng = np.random.default_rng(args.seed)
 
@@ -274,8 +425,7 @@ def main() -> None:
         build_bidirectional_example(
             model=model,
             rng=rng,
-            prefix_steps=args.prefix_steps,
-            suffix_steps=args.suffix_steps,
+            trajectory_length=args.trajectory_length,
             waypoint_radius=args.waypoint_radius,
             waypoint_qvel_scale=args.waypoint_qvel_scale,
             torque_scale=args.torque_scale,
@@ -286,14 +436,22 @@ def main() -> None:
 
     save_path = Path(args.save_path)
     summary_path = Path(args.summary_path)
-    plot_examples(examples, save_path)
+    if args.plot_mode == "overlay":
+        plot_overlay(examples, save_path)
+    elif args.plot_mode == "overlay_with_torque":
+        plot_overlay_with_torque(examples, save_path)
+    else:
+        plot_examples(examples, save_path)
+
+    if args.show_stats:
+        print_trajectory_stats(examples, dt=float(model.opt.timestep))
 
     summary = {
         "xml_path": args.xml_path,
         "seed": args.seed,
+        "dt": float(model.opt.timestep),
         "num_examples": args.num_examples,
-        "prefix_steps": args.prefix_steps,
-        "suffix_steps": args.suffix_steps,
+        "trajectory_length": args.trajectory_length,
         "waypoint_radius": args.waypoint_radius,
         "waypoint_qvel_scale": args.waypoint_qvel_scale,
         "torque_scale": args.torque_scale,
@@ -304,6 +462,8 @@ def main() -> None:
                 "arm_qvel": ex["arm_qvel"].tolist(),
                 "start_xy": ex["start_xy"].tolist(),
                 "end_xy": ex["end_xy"].tolist(),
+                "prefix_steps": int(ex["prefix_steps"]),
+                "suffix_steps": int(ex["suffix_steps"]),
                 "num_points": int(ex["full_xy"].shape[0]),
                 "waypoint_index": int(ex["waypoint_index"]),
             }
