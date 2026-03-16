@@ -44,8 +44,16 @@ def main():
                         help="Optional path to a separate validation h5 file. "
                              "If set, uses strict train/val split across files.")
     parser.add_argument("--checkpoint_dir", type=str, default=config.DEFAULT_CHECKPOINT_DIR)
-    parser.add_argument("--resume_from_checkpoint", type=str, default=config.DEFAULT_RESUME_CHECKPOINT,
-                        help="Path to checkpoint to resume training from")
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help=(
+            "Optional path to checkpoint to resume training from. "
+            "Fresh training no longer auto-resumes from a config default; "
+            "pass this flag explicitly when you want to restore a run."
+        ),
+    )
     
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=config.DEFAULT_BATCH_SIZE)
@@ -572,6 +580,8 @@ def main():
                 print(f"[Training] Non-strict model weight preload skipped due to: {e}")
         else:
             print(f"[Training] Resume checkpoint not found, starting fresh: {args.resume_from_checkpoint}")
+    else:
+        print("[Training] Starting fresh (no resume checkpoint provided).")
     trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)
     print("Training complete!")
 
