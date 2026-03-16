@@ -432,12 +432,12 @@ def main() -> None:
         "--save_dir",
         dest="output_dir",
         type=str,
-        default="/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_dt0p001_len1000",
+        default="/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_unbounded_j1_dt0p001_len1000",
     )
     parser.add_argument(
         "--xml_path",
         type=str,
-        default="/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_from_dataset.xml",
+        default="/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_unbounded_j1.xml",
     )
     parser.add_argument("--train_trajectories", "--num_trajectories", dest="train_trajectories", type=int, default=40000)
     parser.add_argument("--val_trajectories", "--num_val", dest="val_trajectories", type=int, default=2000)

@@ -497,8 +497,8 @@ def render_markdown(
             "- Forward replay error is the most important sanity check. If the pass flags above are `True`, the saved trajectories are self-consistent with the MuJoCo forward simulation under the stored torque sequence.",
             "- Torque clipping is effectively gone in this configuration, which is a good sign for learning smoother control-conditioned dynamics.",
             "- Train and val are well matched in scale and coverage, so the split itself looks healthy.",
-            "- In the current DPF training workflow, Reacher `qpos` is automatically exposed as `[sin(q0), cos(q0), q1]`, with normalization applied only to `q1` inside the `qpos` block.",
-            "- `q1` still crosses its nominal `[-3, 3]` range sometimes, but the overshoot is much smaller and less frequent than in the earlier dataset.",
+            "- In the current DPF training workflow, Reacher `qpos` is automatically exposed as `[sin(q0), cos(q0), sin(q1), cos(q1)]`.",
+            "- All four Reacher `qpos` channels use fixed `[-1, 1]` normalization bounds, so there is no additional angle-range normalization inside the `qpos` block.",
             "",
             "## Files",
             "",
@@ -515,12 +515,12 @@ def main() -> None:
     parser.add_argument(
         "--dataset_dir",
         type=str,
-        default="/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_dt0p001_len1000",
+        default="/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_unbounded_j1_dt0p001_len1000",
     )
     parser.add_argument(
         "--xml_path",
         type=str,
-        default="/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_from_dataset.xml",
+        default="/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_unbounded_j1.xml",
     )
     parser.add_argument("--train_file", type=str, default="traj_40000-steps_1000.h5")
     parser.add_argument("--val_file", type=str, default="traj_2000-steps_1000.h5")

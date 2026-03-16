@@ -13,7 +13,6 @@ This folder contains dataset-generation and dataset-inspection utilities used by
 
 The bidirectional generator is intended for the non-dissipative 2-DoF MuJoCo Reacher defined by:
 
-- [`configs/reacher_non_diss_from_dataset.xml`](/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_from_dataset.xml)
 - [`configs/reacher_non_diss_unbounded_j1.xml`](/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_unbounded_j1.xml)
 
 Generation idea:
@@ -30,37 +29,7 @@ This keeps the saved dataset compatible with the existing HDF5 workflow while en
 
 ## Reproducible Command
 
-The command below reproduces the train/val datasets created for the current bidirectional Reacher setup:
-
-```bash
-/home/gsang/miniconda3/envs/perceiver/bin/python \
-  /home/gsang/Projects/hnn_guided_dpf/scripts/data/generate_bidirectional_reacher_dataset.py \
-  --xml_path /home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_from_dataset.xml \
-  --output_dir /home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_dt0p001_len1000 \
-  --train_trajectories 40000 \
-  --val_trajectories 2000 \
-  --trajectory_length 1000 \
-  --dt 0.001 \
-  --waypoint_radius 0.18 \
-  --waypoint_qvel_scale 0.8 \
-  --torque_scale 0.2 \
-  --waypoint_tolerance 0.01 \
-  --max_abs_qvel 200 \
-  --max_abs_qacc 10000 \
-  --num_workers 24 \
-  --batch_size 256
-```
-
-Expected outputs:
-
-- `traj_40000-steps_1000.h5`
-- `traj_2000-steps_1000.h5`
-
-inside:
-
-- [`data/reacher_bidirectional_dt0p001_len1000`](/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_dt0p001_len1000)
-
-If you want the project-specific variant with both arm joints unbounded, use:
+The command below reproduces the active bidirectional Reacher train/val datasets:
 
 ```bash
 /home/gsang/miniconda3/envs/perceiver/bin/python \
@@ -84,6 +53,8 @@ If you want the project-specific variant with both arm joints unbounded, use:
 inside:
 
 - [`data/reacher_bidirectional_unbounded_j1_dt0p001_len1000`](/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_unbounded_j1_dt0p001_len1000)
+
+The older bounded-`joint1` dataset at [`data/reacher_bidirectional_dt0p001_len1000`](/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_dt0p001_len1000) is legacy/reference only and is no longer part of the supported Reacher DPF workflow.
 
 ## Output Format
 
@@ -119,25 +90,22 @@ File-level attrs include:
 
 ## Important Considerations
 
-### 1. `joint0` is unbounded
+### 1. Both arm joints are periodic in the active Reacher workflow
 
-In the current XML, `joint0` is an unbounded hinge. That means `seq_qpos[:, 0]` can accumulate many turns and may fall far outside `[-pi, pi]`.
+In the active XML, both `joint0` and `joint1` are unbounded hinges. That means both raw angle channels can accumulate many turns and may fall far outside `[-pi, pi]`.
 
-This is physically valid, but it can increase variance during training. It is usually better to handle `joint0` as a periodic variable in the model pipeline, for example with `sin(q0)` / `cos(q0)`, rather than rewriting the saved dataset.
+This is physically valid, but it can increase variance during training. It is usually better to handle both joints as periodic variables in the model pipeline rather than rewriting the saved dataset.
 
 For the current Trajectory DPF training workflow, this is now handled automatically for Reacher datasets:
 
 - the HDF5 file stays unchanged on disk
-- the DPF dataset loader exposes Reacher `qpos` as `[sin(q0), cos(q0), q1]`
-- min-max normalization is treated as identity on `sin(q0)` / `cos(q0)`
-- only `q1` is normalized/denormalized within the `qpos` block
-- whenever generated trajectories are sent back to MuJoCo, `q0` is recovered with `atan2(sin(q0), cos(q0))`
+- the DPF dataset loader exposes Reacher `qpos` as `[sin(q0), cos(q0), sin(q1), cos(q1)]`
+- min-max normalization is treated as identity on all four Reacher `qpos` channels
+- whenever generated trajectories are sent back to MuJoCo, both joints are recovered with `atan2`
 
-If you use the unbounded-`joint1` XML variant, then `joint1` becomes periodic too. In that case the current Reacher-specific DPF representation should be extended from `[sin(q0), cos(q0), q1]` to something like `[sin(q0), cos(q0), sin(q1), cos(q1)]` before training.
+### 2. Do not wrap raw joint angles in the saved trajectories unless you really mean to
 
-### 2. Do not wrap raw `q0` in the saved trajectories unless you really mean to
-
-Wrapping `q0` to `[-pi, pi]` creates a branch cut. If a trajectory crosses that cut, the time series gets an artificial jump. For sequence models, that can be worse than the large raw range.
+Wrapping a raw joint angle to `[-pi, pi]` creates a branch cut. If a trajectory crosses that cut, the time series gets an artificial jump. For sequence models, that can be worse than the large raw range.
 
 ### 3. Current rejection logic is intentionally light
 
@@ -150,30 +118,11 @@ The bidirectional generator does not reject by energy. It only rejects trajector
 
 For the current 40k/2k dataset run, the practical bottleneck was waypoint matching, not `qvel`/`qacc`.
 
-### 3.1 Joint-limit reactions are not recorded in `seq_torque`
+### 3.1 `seq_torque` is cleaner in the active unbounded-joint Reacher
 
-For the bounded-`joint1` non-dissipative Reacher XML, `joint1` still has a positional limit while `joint0` is unbounded. This matters for interpretation:
+Because both arm joints are unbounded in the active XML, MuJoCo does not need arm joint-limit reactions during rollout. That makes `seq_torque` a cleaner record of the explicit actuator forcing for the arm dynamics than it was in the old bounded-`joint1` variant.
 
-- `seq_torque` stores the actuator torque only
-- if `joint1` hits or pushes against its limit, MuJoCo can introduce an additional hidden constraint reaction
-- that reaction is part of the simulator's total generalized forcing, but it is not stored in `seq_torque`
-
-So the saved trajectories are fully consistent with MuJoCo replay under the same XML, but they are not strictly consistent with a simple forced-Hamiltonian equation of the form:
-
-- `p_dot = -dH/dq + tau`
-
-whenever joint-limit reactions are active. In that regime the dynamics are closer to:
-
-- `p_dot = -dH/dq + tau + J(q)^T lambda`
-
-where `lambda` is the joint-limit reaction term.
-
-Implication:
-
-- this is usually acceptable for pure trajectory-generation training
-- it is more important if the dataset will be used for explicit forced-Hamiltonian identification or HNN-style consistency objectives
-- if strict `tau`-only forcing is desired, consider filtering out near-limit trajectories or using an unbounded `joint1`
-- if you use the unbounded-`joint1` XML variant, this hidden joint-limit reaction subtlety disappears for the arm joints
+The legacy bounded dataset can still be useful as a reference artifact, but it is no longer part of the supported Reacher DPF processing path.
 
 ### 4. `dt` matters a lot for bidirectional consistency
 
@@ -196,9 +145,8 @@ So benchmark papers often mean "the default Reacher of framework X", not one sha
 
 Practical takeaway for this project:
 
-- if you want comparability to Gym/Gymnasium Reacher, keeping the bounded `joint1` default is the closer choice
-- if you want cleaner `tau`-only forced-Hamiltonian consistency, making `joint1` unbounded is a defensible project-specific modification
-- that modification should be documented clearly because it makes the environment less directly comparable to the default Gym/Gymnasium Reacher benchmark
+- the supported Reacher DPF workflow uses the unbounded-`joint1` XML because it is cleaner for `tau`-only forced-Hamiltonian interpretation
+- this is a project-specific modification and is less directly comparable to the default Gym/Gymnasium Reacher benchmark
 
 ## Quick Visualization
 

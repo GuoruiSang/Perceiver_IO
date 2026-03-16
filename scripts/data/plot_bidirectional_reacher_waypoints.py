@@ -392,7 +392,7 @@ def main() -> None:
     parser.add_argument(
         "--xml_path",
         type=str,
-        default="/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_from_dataset.xml",
+        default="/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_unbounded_j1.xml",
     )
     parser.add_argument(
         "--save_path",
