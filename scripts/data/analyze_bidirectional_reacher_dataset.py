@@ -485,6 +485,13 @@ def render_markdown(
         "",
         "The files were analyzed using their stored `generator_config` and replayed with the non-dissipative Reacher XML.",
         "",
+        "The active generator uses one smooth full-length torque sequence per trajectory. The prefix helper consumes the prefix segment in reversed time order internally, but the saved `seq_torque` stays in the original forward-time order for the whole trajectory.",
+        "",
+        "This gives two useful properties at once:",
+        "",
+        "- the saved torque sequence is smooth through the waypoint seam",
+        "- the saved trajectory can be replayed from timestep 0 by forward dynamics alone and still pass through its designated waypoint",
+        "",
     ]
     lines.extend(split_block("Train", train_summary))
     lines.extend(split_block("Val", val_summary))
@@ -495,6 +502,7 @@ def render_markdown(
             "This dataset is numerically much cleaner than the earlier high-torque version.",
             "",
             "- Forward replay error is the most important sanity check. If the pass flags above are `True`, the saved trajectories are self-consistent with the MuJoCo forward simulation under the stored torque sequence.",
+            "- For the active construction, the same forward replay also preserves the designated waypoint at `waypoint_index`; there is no hidden backward-time-only dependence in the saved files.",
             "- Torque clipping is effectively gone in this configuration, which is a good sign for learning smoother control-conditioned dynamics.",
             "- Train and val are well matched in scale and coverage, so the split itself looks healthy.",
             "- In the current DPF training workflow, Reacher `qpos` is automatically exposed as `[sin(q0), cos(q0), sin(q1), cos(q1)]`.",

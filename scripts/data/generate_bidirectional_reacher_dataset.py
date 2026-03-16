@@ -235,8 +235,10 @@ def build_bidirectional_reacher_trajectory(task: tuple) -> tuple[bool, str, dict
     prefix_steps = int(rng.integers(1, trajectory_length - 1))
     suffix_steps = int(trajectory_length - 1 - prefix_steps)
 
-    prefix_helper_tau = generate_smooth_torque(rng, prefix_steps, dt, model.nu, torque_scale)
-    suffix_tau_full = generate_smooth_torque(rng, suffix_steps + 1, dt, model.nu, torque_scale)
+    full_tau = generate_smooth_torque(rng, trajectory_length, dt, model.nu, torque_scale)
+    prefix_rollout_tau = full_tau[:prefix_steps]
+    prefix_helper_tau = prefix_rollout_tau[::-1].copy()
+    suffix_tau_full = full_tau[prefix_steps:]
 
     prefix_qpos_helper, prefix_qvel_helper = simulate_helper_segment(
         model=model,
@@ -249,7 +251,7 @@ def build_bidirectional_reacher_trajectory(task: tuple) -> tuple[bool, str, dict
 
     start_arm_qpos = prefix_qpos_helper[-1, [ids["joint0_qpos"], ids["joint1_qpos"]]]
     start_arm_qvel = -prefix_qvel_helper[-1, [ids["joint0_dof"], ids["joint1_dof"]]]
-    replay_tau = np.concatenate([prefix_helper_tau[::-1], suffix_tau_full], axis=0)
+    replay_tau = full_tau
 
     try:
         result = simulate_dataset_rollout(

@@ -143,8 +143,10 @@ def build_bidirectional_example(
     prefix_steps = int(rng.integers(1, trajectory_length - 1))
     suffix_steps = int(trajectory_length - 1 - prefix_steps)
 
-    prefix_helper_tau = generate_smooth_torque(rng, prefix_steps, model.opt.timestep, model.nu, torque_scale)
-    suffix_tau = generate_smooth_torque(rng, suffix_steps, model.opt.timestep, model.nu, torque_scale)
+    full_tau = generate_smooth_torque(rng, trajectory_length, model.opt.timestep, model.nu, torque_scale)
+    prefix_rollout_tau = full_tau[:prefix_steps]
+    prefix_helper_tau = prefix_rollout_tau[::-1].copy()
+    suffix_tau = full_tau[prefix_steps:]
 
     prefix_qpos_helper, prefix_qvel_helper, prefix_xy_helper = simulate_segment(
         model=model,
@@ -184,8 +186,9 @@ def build_bidirectional_example(
         "waypoint_index": waypoint_index,
         "prefix_steps": prefix_steps,
         "suffix_steps": suffix_steps,
-        "prefix_tau": prefix_helper_tau,
+        "prefix_tau": prefix_rollout_tau,
         "suffix_tau": suffix_tau,
+        "full_tau": full_tau,
         "start_xy": full_xy[0],
         "end_xy": full_xy[-1],
     }

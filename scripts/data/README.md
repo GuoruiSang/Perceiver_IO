@@ -20,9 +20,10 @@ Generation idea:
 - sample a waypoint in task space
 - solve IK for the waypoint pose
 - sample a waypoint velocity
-- generate a helper prefix from the waypoint with negated velocity
-- reverse the prefix torques and concatenate them with a forward suffix torque sequence
-- replay the full torque sequence as one forward rollout
+- sample one smooth full-length torque sequence for the entire trajectory
+- split that torque sequence at a random waypoint index
+- run the helper prefix from the waypoint with negated velocity using the prefix torque segment in reversed time order
+- replay the saved trajectory from timestep 0 using the original forward-time torque sequence
 - keep the rollout only if the end effector hits the waypoint within tolerance and the loose `qvel` / `qacc` sanity checks pass
 
 This keeps the saved dataset compatible with the existing HDF5 workflow while ensuring each accepted trajectory contains a designated waypoint.
@@ -131,6 +132,16 @@ The qualitative bidirectional idea works at larger `dt`, but the replay consiste
 ### 5. Smooth torque is clipped to actuator limits
 
 Torques are generated as sums of sinusoids and then clipped to stay inside the actuator range. This keeps controls feasible for MuJoCo even when several sinusoidal components add constructively.
+
+### 5.1 The active generator now uses one smooth torque sequence per trajectory
+
+The current bidirectional construction no longer stitches together independently sampled prefix and suffix torques. Instead, it samples one smooth full-length torque sequence, splits it at the waypoint index, and only reverses the prefix segment for the internal helper rollout.
+
+That means:
+
+- the saved `seq_torque` is smooth across the waypoint in forward time
+- the full saved trajectory can be replayed exactly from timestep 0 using only forward dynamics
+- the replayed trajectory still passes through the designated waypoint at `waypoint_index`
 
 ### 6. Benchmark comparability versus project-specific physics cleanliness
 
