@@ -3,6 +3,12 @@ import h5py
 import torch
 import numpy as np
 
+from src.qpos_representation import (
+    RAW_QPOS,
+    encode_qpos_array,
+    infer_qpos_representation_from_xml,
+)
+
 
 def infer_hnn_torque_alignment(h5_attrs) -> str:
     """Infer how torque should align with HNN state/derivative targets.
@@ -42,12 +48,18 @@ class TrajectoryDPF(Dataset):
         # Load metadata
         for k, v in self.h5_file.attrs.items():
             self.metadata[k] = v
+        self.xml = self.metadata.get('xml', None)
+        self.qpos_representation = infer_qpos_representation_from_xml(self.xml)
+        if self.qpos_representation != RAW_QPOS:
+            print(f"[TrajectoryDPF] Using qpos representation: {self.qpos_representation}")
 
     def __getitem__(self, index):
         traj_data = self.h5_file[f'traj_{index}']
+        seq_qpos = traj_data['seq_qpos'][:]
+        seq_qpos = encode_qpos_array(seq_qpos, self.qpos_representation)
 
         item = {
-            'seq_qpos': torch.from_numpy(traj_data['seq_qpos'][:]),  # [:] to load into memory
+            'seq_qpos': torch.from_numpy(seq_qpos),  # [:] to load into memory
             'seq_qvel': torch.from_numpy(traj_data['seq_qvel'][:]),
             'seq_qacc': torch.from_numpy(traj_data['seq_qacc'][:]),
             'seq_mom': torch.from_numpy(traj_data['seq_mom'][:]),
@@ -211,13 +223,15 @@ class TrajectoryDPFCached(Dataset):
             self.dt = f.attrs.get('dt', 0.0001)
             self.data_dt = f.attrs.get('data_dt', 0.0002)
             self.xml = f.attrs.get('xml', None)
+            self.qpos_representation = infer_qpos_representation_from_xml(self.xml)
 
             # Pre-allocate and load all data at once
             self.all_seq_qpos, self.all_seq_mom, self.all_seq_torque = [], [], []
 
             for i in range(self.num_traj):
                 traj = f[f'traj_{i}']
-                self.all_seq_qpos.append(traj['seq_qpos'][:trajectory_length])
+                raw_qpos = traj['seq_qpos'][:trajectory_length]
+                self.all_seq_qpos.append(encode_qpos_array(raw_qpos, self.qpos_representation))
                 self.all_seq_torque.append(traj['seq_torque'][:trajectory_length])
                 self.all_seq_mom.append(traj['seq_mom'][:trajectory_length])
 
@@ -226,6 +240,8 @@ class TrajectoryDPFCached(Dataset):
         self.all_seq_torque = torch.from_numpy(np.array(self.all_seq_torque))
 
         print("---------------Statistics--------------")
+        if self.qpos_representation != RAW_QPOS:
+            print(f"qpos representation: {self.qpos_representation}")
         print(f"Range of qpos: [{self.all_seq_qpos.max()} - {self.all_seq_qpos.min()}]; Std of qpos: {self.all_seq_qpos.std()}")
         print(f"Range of mom: [{self.all_seq_mom.max()} - {self.all_seq_mom.min()}]; Std of mom: {self.all_seq_mom.std()}")
         print(f"Range of torque: [{self.all_seq_torque.max()} - {self.all_seq_torque.min()}]; Std of torque: {self.all_seq_torque.std()}")

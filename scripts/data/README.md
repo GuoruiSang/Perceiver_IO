@@ -99,6 +99,14 @@ In the current XML, `joint0` is an unbounded hinge. That means `seq_qpos[:, 0]` 
 
 This is physically valid, but it can increase variance during training. It is usually better to handle `joint0` as a periodic variable in the model pipeline, for example with `sin(q0)` / `cos(q0)`, rather than rewriting the saved dataset.
 
+For the current Trajectory DPF training workflow, this is now handled automatically for Reacher datasets:
+
+- the HDF5 file stays unchanged on disk
+- the DPF dataset loader exposes Reacher `qpos` as `[sin(q0), cos(q0), q1]`
+- min-max normalization is treated as identity on `sin(q0)` / `cos(q0)`
+- only `q1` is normalized/denormalized within the `qpos` block
+- whenever generated trajectories are sent back to MuJoCo, `q0` is recovered with `atan2(sin(q0), cos(q0))`
+
 ### 2. Do not wrap raw `q0` in the saved trajectories unless you really mean to
 
 Wrapping `q0` to `[-pi, pi]` creates a branch cut. If a trajectory crosses that cut, the time series gets an artificial jump. For sequence models, that can be worse than the large raw range.
@@ -114,6 +122,30 @@ The bidirectional generator does not reject by energy. It only rejects trajector
 
 For the current 40k/2k dataset run, the practical bottleneck was waypoint matching, not `qvel`/`qacc`.
 
+### 3.1 Joint-limit reactions are not recorded in `seq_torque`
+
+For the current non-dissipative Reacher XML, `joint1` still has a positional limit while `joint0` is unbounded. This matters for interpretation:
+
+- `seq_torque` stores the actuator torque only
+- if `joint1` hits or pushes against its limit, MuJoCo can introduce an additional hidden constraint reaction
+- that reaction is part of the simulator's total generalized forcing, but it is not stored in `seq_torque`
+
+So the saved trajectories are fully consistent with MuJoCo replay under the same XML, but they are not strictly consistent with a simple forced-Hamiltonian equation of the form:
+
+- `p_dot = -dH/dq + tau`
+
+whenever joint-limit reactions are active. In that regime the dynamics are closer to:
+
+- `p_dot = -dH/dq + tau + J(q)^T lambda`
+
+where `lambda` is the joint-limit reaction term.
+
+Implication:
+
+- this is usually acceptable for pure trajectory-generation training
+- it is more important if the dataset will be used for explicit forced-Hamiltonian identification or HNN-style consistency objectives
+- if strict `tau`-only forcing is desired, consider filtering out near-limit trajectories or using an unbounded `joint1`
+
 ### 4. `dt` matters a lot for bidirectional consistency
 
 The qualitative bidirectional idea works at larger `dt`, but the replay consistency is much better at `dt=0.001` than at `dt=0.01`. If you change `dt`, re-check the waypoint-hit rate and rollout quality before generating a large dataset.
@@ -121,6 +153,23 @@ The qualitative bidirectional idea works at larger `dt`, but the replay consiste
 ### 5. Smooth torque is clipped to actuator limits
 
 Torques are generated as sums of sinusoids and then clipped to stay inside the actuator range. This keeps controls feasible for MuJoCo even when several sinusoidal components add constructively.
+
+### 6. Benchmark comparability versus project-specific physics cleanliness
+
+There is no single universal "standard Reacher XML" across the literature.
+
+Two common benchmark families are:
+
+- Gym/Gymnasium MuJoCo Reacher, whose default environment keeps the classic 2-joint reacher task and exposes torques on `joint0` and `joint1`
+- DeepMind Control Suite Reacher, which is a different benchmark family with its own task definition and defaults
+
+So benchmark papers often mean "the default Reacher of framework X", not one shared XML used across all papers.
+
+Practical takeaway for this project:
+
+- if you want comparability to Gym/Gymnasium Reacher, keeping the bounded `joint1` default is the closer choice
+- if you want cleaner `tau`-only forced-Hamiltonian consistency, making `joint1` unbounded is a defensible project-specific modification
+- that modification should be documented clearly because it makes the environment less directly comparable to the default Gym/Gymnasium Reacher benchmark
 
 ## Quick Visualization
 

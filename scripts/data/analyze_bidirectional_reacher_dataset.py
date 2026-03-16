@@ -497,7 +497,7 @@ def render_markdown(
             "- Forward replay error is the most important sanity check. If the pass flags above are `True`, the saved trajectories are self-consistent with the MuJoCo forward simulation under the stored torque sequence.",
             "- Torque clipping is effectively gone in this configuration, which is a good sign for learning smoother control-conditioned dynamics.",
             "- Train and val are well matched in scale and coverage, so the split itself looks healthy.",
-            "- `q0` is still periodic and unwrapped, so model inputs should still treat it as periodic rather than as an ordinary Euclidean coordinate.",
+            "- In the current DPF training workflow, Reacher `qpos` is automatically exposed as `[sin(q0), cos(q0), q1]`, with normalization applied only to `q1` inside the `qpos` block.",
             "- `q1` still crosses its nominal `[-3, 3]` range sometimes, but the overshoot is much smaller and less frequent than in the earlier dataset.",
             "",
             "## Files",

@@ -13,6 +13,10 @@ from perceiver.model.core import (
 from src.models.utils import (
     EMA,
 )
+from src.qpos_representation import (
+    decode_qpos_tensor,
+    raw_qpos_dim,
+)
 from src import config
 
 from src.models.trajectory_dpf_sampling import TrajectoryDPFSampling
@@ -77,6 +81,7 @@ class TrajectoryDPF(TrajectoryDPFSampling, TrajectoryDPFTraining, pl.LightningMo
         dt: float = 0.0001,  # Fine simulation timestep
         data_dt: float = 0.0002,  # Data collection timestep (skip_steps * dt = 2 * 0.0001)
         xml_content: Optional[str] = None,  # MuJoCo model XML content
+        qpos_representation: str = "raw",
         # Min-max normalization stats (optional, will be computed if not provided)
         qpos_min: Optional[torch.Tensor] = None,
         qpos_max: Optional[torch.Tensor] = None,
@@ -129,6 +134,8 @@ class TrajectoryDPF(TrajectoryDPFSampling, TrajectoryDPFTraining, pl.LightningMo
         self.save_hyperparameters(ignore=["unconditional_tau_in_state", "training_context_mode"])
         
         self.qpos_dim = qpos_dim
+        self.qpos_representation = qpos_representation
+        self.raw_qpos_dim = raw_qpos_dim(qpos_dim, qpos_representation)
         self.mom_dim = mom_dim
         self.torque_dim = torque_dim
         self.conditioning_mode = conditioning_mode
@@ -380,6 +387,10 @@ class TrajectoryDPF(TrajectoryDPFSampling, TrajectoryDPFTraining, pl.LightningMo
     def denormalize_cond(self, cond: torch.Tensor) -> torch.Tensor:
         """Denormalize conditioning (torque) from [-1, 1] to original scale."""
         return (cond + 1.0) / 2.0 * self.cond_range + self.cond_min
+
+    def decode_qpos(self, qpos: torch.Tensor) -> torch.Tensor:
+        """Decode model-space qpos into raw MuJoCo joint angles when needed."""
+        return decode_qpos_tensor(qpos, self.qpos_representation)
 
     def _shift_torque_sequence(self, torque: torch.Tensor) -> torch.Tensor:
         """

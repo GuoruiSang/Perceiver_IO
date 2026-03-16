@@ -15,6 +15,8 @@ import numpy as np
 import os
 import mujoco
 
+from src.qpos_representation import decode_qpos_array, decode_qpos_tensor
+
 class EMA:
     """Exponential Moving Average (EMA) helper (not an nn.Module).
 
@@ -204,6 +206,7 @@ def compute_hnn_physics_energy(
     seq_torque: torch.Tensor,
     hnn: nn.Module,
     dt: float,
+    qpos_representation: str = "raw",
     use_forward_diff: bool = False,
 ) -> torch.Tensor:
     """
@@ -231,13 +234,15 @@ def compute_hnn_physics_energy(
     """
     B, T, _ = seq_mom.shape
 
+    seq_qpos_phys = decode_qpos_tensor(seq_qpos, qpos_representation)
+
     # Use t=0..T-2 as "current" states
-    q_t = seq_qpos[:, :-1]   # [B, T-1, qpos_dim]
+    q_t = seq_qpos_phys[:, :-1]   # [B, T-1, qpos_dim]
     p_t = seq_mom[:, :-1]    # [B, T-1, mom_dim]
     tau_t = seq_torque[:, :-1]  # [B, T-1, torque_dim]
 
     # Actual next states
-    q_next = seq_qpos[:, 1:]  # [B, T-1, qpos_dim]
+    q_next = seq_qpos_phys[:, 1:]  # [B, T-1, qpos_dim]
     p_next = seq_mom[:, 1:]   # [B, T-1, mom_dim]
 
     # Compute HNN gradients (flatten for StructuredHNN compatibility)
@@ -272,6 +277,7 @@ def compute_hnn_robust_hamres_energy(
     seq_torque: torch.Tensor,
     hnn: nn.Module,
     dt: float,
+    qpos_representation: str = "raw",
     smooth_sigma: float = 1.0,
     delta: float = 1.0,
     min_scale_q: float = 1e-3,
@@ -291,7 +297,8 @@ def compute_hnn_robust_hamres_energy(
         # Keep graph-connected scalar.
         return seq_qpos.new_zeros(())
 
-    q_use = _gaussian_smooth_time_3d(seq_qpos, smooth_sigma)
+    seq_qpos_phys = decode_qpos_tensor(seq_qpos, qpos_representation)
+    q_use = _gaussian_smooth_time_3d(seq_qpos_phys, smooth_sigma)
     p_use = _gaussian_smooth_time_3d(seq_mom, smooth_sigma)
 
     qdot = (q_use[:, 2:] - q_use[:, :-2]) / (2 * dt)
@@ -356,6 +363,7 @@ def run_one_step_guidance_hnn(
     mom_dim: int,
     dt: float,
     hnn: nn.Module,
+    qpos_representation: str = "raw",
     alpha_q: float = 1e-4,
     alpha_p: float = 1e-4,
     guidance_trust_lambda: float = 0.0,
@@ -371,7 +379,15 @@ def run_one_step_guidance_hnn(
     q_ref = x[:, :, :qpos_dim].detach()
     p_ref = x[:, :, qpos_dim:qpos_dim + mom_dim].detach()
 
-    energy = compute_hnn_physics_energy(seq_qpos, seq_mom, seq_torque, hnn, dt, use_forward_diff=False)
+    energy = compute_hnn_physics_energy(
+        seq_qpos,
+        seq_mom,
+        seq_torque,
+        hnn,
+        dt,
+        qpos_representation=qpos_representation,
+        use_forward_diff=False,
+    )
     energy = _add_trust_regularizer(energy, seq_qpos, seq_mom, q_ref, p_ref, guidance_trust_lambda)
     grad_q, grad_p = torch.autograd.grad(energy, [seq_qpos, seq_mom])
 
@@ -442,6 +458,7 @@ def compare_generated_with_reconstructed(
     generated: dict, mujoco_model_path: str, save_path: str, dt: float = 0.0005, data_dt: float = None,
     name: str = None, trajectory_alignment: str = 'pre_step', return_series: bool = False,
     prefix_len: int = 0,
+    qpos_representation: str = "raw",
 ) -> dict:
     """
     Compare generated trajectory with physics-reconstructed trajectory.
@@ -478,13 +495,14 @@ def compare_generated_with_reconstructed(
     model = mujoco.MjModel.from_xml_path(mujoco_model_path)
     data = mujoco.MjData(model)
     
-    qpos_dim = int(gen['seq_qpos'].shape[-1])
+    gen_qpos_raw = decode_qpos_array(gen['seq_qpos'], qpos_representation)
+    qpos_dim = int(gen_qpos_raw.shape[-1])
     mom_dim = int(gen['seq_mom'].shape[-1])
 
     # Compute initial velocity from initial momentum: v = M^{-1} @ p
     print("[Compare] Computing initial velocity from momentum")
     data.qpos[:] = 0.0
-    data.qpos[:qpos_dim] = gen['seq_qpos'][0]
+    data.qpos[:qpos_dim] = gen_qpos_raw[0]
     data.qvel[:] = 0  # Temporary
     mujoco.mj_forward(model, data)
     
@@ -497,7 +515,7 @@ def compare_generated_with_reconstructed(
     print(f"[Compare] Reconstructing trajectory for {len(gen['seq_qpos'])} steps")
     recon = reconstruct_traj_with_momentum(
         model, len(gen['seq_qpos']), dt,
-        gen['seq_qpos'][0], initial_qvel, gen['seq_torque'],
+        gen_qpos_raw[0], initial_qvel, gen['seq_torque'],
         data_dt=data_dt
     )
     print("[Compare] Reconstruction finished")
@@ -506,7 +524,7 @@ def compare_generated_with_reconstructed(
     recon_mom = recon['seq_mom'][..., :mom_dim]
     gen_qpos, gen_mom, gen_tau, recon_qpos, recon_mom, recon_tau = _align_generated_and_reconstructed(
         {
-            'seq_qpos': gen['seq_qpos'],
+            'seq_qpos': gen_qpos_raw,
             'seq_mom': gen['seq_mom'],
             'seq_torque': gen['seq_torque'],
         },
@@ -595,6 +613,7 @@ def compare_multiple_generated_with_reconstructed(
     name: str = None,
     trajectory_alignment: str = 'pre_step',
     prefix_len: int = 0,
+    qpos_representation: str = "raw",
 ) -> dict:
     """
     Overlay multiple sampled branches from the same history prefix in the same
@@ -616,6 +635,7 @@ def compare_multiple_generated_with_reconstructed(
             name=None,
             trajectory_alignment=trajectory_alignment,
             return_series=True,
+            qpos_representation=qpos_representation,
         )
         for generated in generated_list
     ]

@@ -119,9 +119,10 @@ class WandBTrajectoryCallback(pl.Callback):
             for sample_idx in range(state_np.shape[0]):
                 state_traj = state_np[sample_idx]
                 torque_traj = torque_np[sample_idx]
+                qpos_traj = pl_module.decode_qpos(state_traj[:, :qpos_dim]).cpu()
                 generated_list.append(
                     {
-                        "seq_qpos": state_traj[:, :qpos_dim],
+                        "seq_qpos": qpos_traj,
                         "seq_mom": state_traj[:, qpos_dim:qpos_dim + mom_dim],
                         "seq_torque": torque_traj,
                     }

@@ -8,8 +8,17 @@ This module contains reusable utility functions:
 import torch
 from tqdm import tqdm
 
+from src.qpos_representation import override_qpos_normalization_stats
 
-def compute_normalization_stats(dataloader, qpos_dim, mom_dim, torque_dim, max_timesteps):
+
+def compute_normalization_stats(
+    dataloader,
+    qpos_dim,
+    mom_dim,
+    torque_dim,
+    max_timesteps,
+    qpos_representation: str = "raw",
+):
     """
     Compute min and max for min-max normalization to [-1, 1].
     
@@ -55,6 +64,10 @@ def compute_normalization_stats(dataloader, qpos_dim, mom_dim, torque_dim, max_t
         torque_max = torch.max(torque_max, torque.max(dim=0)[0].max(dim=0)[0])
         count += B
     
+    qpos_min, qpos_max = override_qpos_normalization_stats(
+        qpos_min, qpos_max, qpos_representation=qpos_representation
+    )
+
     # Compute ranges
     qpos_range = qpos_max - qpos_min
     mom_range = mom_max - mom_min

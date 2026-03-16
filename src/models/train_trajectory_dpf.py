@@ -226,6 +226,7 @@ def main():
     mom_dim = sample['seq_mom'].shape[-1]
     torque_dim = sample['seq_torque'].shape[-1]
     max_timesteps = full_dataset.num_steps
+    qpos_representation = getattr(full_dataset, "qpos_representation", "raw")
 
     # Get simulation metadata from dataset
     dt = full_dataset.dt
@@ -236,6 +237,7 @@ def main():
     print(f"  Trajectories: {len(dataset)}")
     print(f"  Timesteps: {max_timesteps}")
     print(f"  qpos_dim: {qpos_dim}, mom_dim: {mom_dim}, torque_dim: {torque_dim}")
+    print(f"  qpos_representation: {qpos_representation}")
     print(f"  dt: {dt}, data_dt: {data_dt}")
     print(f"  XML content: {'loaded' if xml_content else 'not available'}")
     print(f"  conditioning_mode: {args.conditioning_mode}")
@@ -283,7 +285,8 @@ def main():
     # Compute normalization stats (min-max for scaling to [-1, 1])
     stats_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
     qpos_min, qpos_max, mom_min, mom_max, torque_min, torque_max = compute_normalization_stats(
-        stats_loader, qpos_dim, mom_dim, torque_dim, max_timesteps
+        stats_loader, qpos_dim, mom_dim, torque_dim, max_timesteps,
+        qpos_representation=qpos_representation,
     )
     
     print("[Startup] Normalization stats computed.", flush=True)
@@ -392,6 +395,7 @@ def main():
         dt=dt,
         data_dt=data_dt,
         xml_content=xml_content,
+        qpos_representation=qpos_representation,
         qpos_min=qpos_min,
         qpos_max=qpos_max,
         mom_min=mom_min,
