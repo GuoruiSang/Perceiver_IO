@@ -15,7 +15,11 @@ import numpy as np
 import os
 import mujoco
 
-from src.qpos_representation import decode_qpos_array, decode_qpos_tensor
+from src.qpos_representation import (
+    REACHER_Q0Q1_SINCOS,
+    decode_qpos_array,
+    decode_qpos_tensor,
+)
 
 class EMA:
     """Exponential Moving Average (EMA) helper (not an nn.Module).
@@ -121,6 +125,13 @@ def visualize_trajectory(trajectory: dict, save_path: str, name: str = 'trajecto
 
     fig.savefig(os.path.join(save_path, f'{name}.jpg'))
     plt.close(fig)
+
+
+def _unwrap_qpos_for_plotting(qpos: np.ndarray, qpos_representation: str) -> np.ndarray:
+    """Unwrap periodic angle trajectories for visualization only."""
+    if qpos_representation != REACHER_Q0Q1_SINCOS:
+        return qpos
+    return np.unwrap(qpos, axis=0)
 
 
 def central_difference(seq: torch.Tensor, dt: float) -> torch.Tensor:
@@ -538,13 +549,20 @@ def compare_generated_with_reconstructed(
     mse_qpos = np.mean((gen_qpos - recon_qpos) ** 2)
     mse_mom = np.mean((gen_mom - recon_mom) ** 2)
     mse_total = mse_qpos + mse_mom
+    gen_qpos_plot = _unwrap_qpos_for_plotting(gen_qpos, qpos_representation)
+    recon_qpos_plot = _unwrap_qpos_for_plotting(recon_qpos, qpos_representation)
     
     # Only create plot if name is provided
     if name is not None:
         print("[Compare] Building matplotlib figure")
         keys = ['seq_qpos', 'seq_mom', 'seq_torque']
         nrows, ncols = len(keys), max(v.shape[-1] for v in gen.values())
-        fig, axes = plt.subplots(nrows, ncols, figsize=(30, 10))
+        fig, axes = plt.subplots(
+            nrows,
+            ncols,
+            figsize=(30, 10),
+            constrained_layout=True,
+        )
         
         # Add MSE info to the figure title
         fig.suptitle(f'MSE: qpos={mse_qpos:.6f}, mom={mse_mom:.6f}, total={mse_total:.6f}', fontsize=14, y=1.02)
@@ -552,8 +570,8 @@ def compare_generated_with_reconstructed(
         prefix_len = max(0, int(prefix_len))
         for i, key in enumerate(keys):
             if key == 'seq_qpos':
-                gen_data = gen_qpos
-                recon_data = recon_qpos
+                gen_data = gen_qpos_plot
+                recon_data = recon_qpos_plot
             elif key == 'seq_mom':
                 gen_data = gen_mom
                 recon_data = recon_mom
@@ -568,20 +586,39 @@ def compare_generated_with_reconstructed(
                         axes[i, j].scatter(
                             t[:prefix_end], gen_data[:prefix_end, j], s=1, c='black', label='Prefix', alpha=0.9
                         )
-                    axes[i, j].scatter(
-                        t[prefix_end:], gen_data[prefix_end:, j], s=1, c='blue', label='Generated', alpha=0.7
-                    )
-                    axes[i, j].scatter(
-                        t[prefix_end:], recon_data[prefix_end:, j], s=1, c='red', label='Reconstructed', alpha=0.7
-                    )
+                    if key == 'seq_torque':
+                        axes[i, j].scatter(
+                            t[prefix_end:],
+                            gen_data[prefix_end:, j],
+                            s=1,
+                            c='crimson',
+                            label='Applied torque',
+                            alpha=0.7,
+                        )
+                    else:
+                        axes[i, j].scatter(
+                            t[prefix_end:],
+                            gen_data[prefix_end:, j],
+                            s=1,
+                            c='blue',
+                            label='Generated',
+                            alpha=0.7,
+                        )
+                        axes[i, j].scatter(
+                            t[prefix_end:],
+                            recon_data[prefix_end:, j],
+                            s=1,
+                            c='red',
+                            label='Reconstructed',
+                            alpha=0.7,
+                        )
                     if prefix_end > 0:
                         axes[i, j].axvline(prefix_end - 1, color='gray', linestyle=':', linewidth=1.0)
                     axes[i, j].set_title(f'{key}[{j}]')
-                    axes[i, j].legend(markerscale=5)
+                    axes[i, j].legend(markerscale=4, fontsize=9, loc='best')
             for j in range(gen_data.shape[-1], ncols):
                 axes[i, j].set_visible(False)
-        
-        fig.tight_layout()
+
         out_path = os.path.join(save_path, f'{name}.jpg')
         print(f"[Compare] Saving figure to {out_path}")
         fig.savefig(out_path, bbox_inches='tight')
@@ -593,10 +630,10 @@ def compare_generated_with_reconstructed(
     if return_series:
         out.update(
             {
-                'generated_qpos': gen_qpos,
+                'generated_qpos': gen_qpos_plot,
                 'generated_mom': gen_mom,
                 'generated_torque': gen_tau,
-                'reconstructed_qpos': recon_qpos,
+                'reconstructed_qpos': recon_qpos_plot,
                 'reconstructed_mom': recon_mom,
                 'reconstructed_torque': recon_tau,
             }
@@ -684,30 +721,40 @@ def compare_multiple_generated_with_reconstructed(
                         label='Prefix',
                     )
                     prefix_plotted = True
-                ax.scatter(
-                    t[prefix_end:],
-                    gen_arr[prefix_end:, dim],
-                    s=2,
-                    c='blue',
-                    alpha=0.18,
-                    label='Generated branches' if not gen_plotted else None,
-                )
-                gen_plotted = True
-                ax.scatter(
-                    t[prefix_end:],
-                    recon_arr[prefix_end:, dim],
-                    s=2,
-                    c='red',
-                    alpha=0.18,
-                    label='Reconstructed branches' if not recon_plotted else None,
-                )
-                recon_plotted = True
+                if title == 'seq_torque':
+                    ax.scatter(
+                        t[prefix_end:],
+                        gen_arr[prefix_end:, dim],
+                        s=2,
+                        c='crimson',
+                        alpha=0.18,
+                        label='Applied torque branches' if not gen_plotted else None,
+                    )
+                    gen_plotted = True
+                else:
+                    ax.scatter(
+                        t[prefix_end:],
+                        gen_arr[prefix_end:, dim],
+                        s=2,
+                        c='blue',
+                        alpha=0.18,
+                        label='Generated branches' if not gen_plotted else None,
+                    )
+                    gen_plotted = True
+                    ax.scatter(
+                        t[prefix_end:],
+                        recon_arr[prefix_end:, dim],
+                        s=2,
+                        c='red',
+                        alpha=0.18,
+                        label='Reconstructed branches' if not recon_plotted else None,
+                    )
+                    recon_plotted = True
             if prefix_len > 0:
                 ax.axvline(prefix_len - 1, color='gray', linestyle=':', linewidth=1.0)
             ax.set_title(f'{title}[{dim}]')
-            ax.legend(markerscale=5)
+            ax.legend(markerscale=4, fontsize=9, loc='best')
 
-    fig.tight_layout()
     out_path = os.path.join(save_path, f'{name}.jpg')
     print(f"[Compare] Saving multi-branch figure to {out_path}")
     fig.savefig(out_path, bbox_inches='tight')

@@ -119,7 +119,7 @@ class WandBTrajectoryCallback(pl.Callback):
             for sample_idx in range(state_np.shape[0]):
                 state_traj = state_np[sample_idx]
                 torque_traj = torque_np[sample_idx]
-                qpos_traj = pl_module.decode_qpos(state_traj[:, :qpos_dim]).cpu()
+                qpos_traj = state_traj[:, :qpos_dim].cpu()
                 generated_list.append(
                     {
                         "seq_qpos": qpos_traj,
@@ -145,6 +145,7 @@ class WandBTrajectoryCallback(pl.Callback):
                             data_dt=pl_module.data_dt,
                             name="comparison",
                             prefix_len=prefix_len,
+                            qpos_representation=pl_module.qpos_representation,
                         )
                     else:
                         compare_generated_with_reconstructed(
@@ -155,11 +156,14 @@ class WandBTrajectoryCallback(pl.Callback):
                             data_dt=pl_module.data_dt,
                             name="comparison",
                             prefix_len=prefix_len,
+                            qpos_representation=pl_module.qpos_representation,
                         )
                     faulthandler.cancel_dump_traceback_later()
                     plot_path = os.path.join(tmp_dir, "comparison.jpg")
                 else:
-                    visualize_trajectory(generated_list[0], tmp_dir)
+                    fallback_traj = generated_list[0].copy()
+                    fallback_traj["seq_qpos"] = pl_module.decode_qpos(fallback_traj["seq_qpos"]).cpu()
+                    visualize_trajectory(fallback_traj, tmp_dir)
                     plot_path = os.path.join(tmp_dir, "trajectory.jpg")
 
                 wandb.log({
