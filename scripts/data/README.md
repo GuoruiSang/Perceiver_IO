@@ -14,6 +14,7 @@ This folder contains dataset-generation and dataset-inspection utilities used by
 The bidirectional generator is intended for the non-dissipative 2-DoF MuJoCo Reacher defined by:
 
 - [`configs/reacher_non_diss_from_dataset.xml`](/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_from_dataset.xml)
+- [`configs/reacher_non_diss_unbounded_j1.xml`](/home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_unbounded_j1.xml)
 
 Generation idea:
 
@@ -58,6 +59,31 @@ Expected outputs:
 inside:
 
 - [`data/reacher_bidirectional_dt0p001_len1000`](/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_dt0p001_len1000)
+
+If you want the project-specific variant with both arm joints unbounded, use:
+
+```bash
+/home/gsang/miniconda3/envs/perceiver/bin/python \
+  /home/gsang/Projects/hnn_guided_dpf/scripts/data/generate_bidirectional_reacher_dataset.py \
+  --xml_path /home/gsang/Projects/hnn_guided_dpf/configs/reacher_non_diss_unbounded_j1.xml \
+  --output_dir /home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_unbounded_j1_dt0p001_len1000 \
+  --train_trajectories 40000 \
+  --val_trajectories 2000 \
+  --trajectory_length 1000 \
+  --dt 0.001 \
+  --waypoint_radius 0.18 \
+  --waypoint_qvel_scale 0.8 \
+  --torque_scale 0.2 \
+  --waypoint_tolerance 0.01 \
+  --max_abs_qvel 200 \
+  --max_abs_qacc 10000 \
+  --num_workers 24 \
+  --batch_size 256
+```
+
+inside:
+
+- [`data/reacher_bidirectional_unbounded_j1_dt0p001_len1000`](/home/gsang/Projects/hnn_guided_dpf/data/reacher_bidirectional_unbounded_j1_dt0p001_len1000)
 
 ## Output Format
 
@@ -107,6 +133,8 @@ For the current Trajectory DPF training workflow, this is now handled automatica
 - only `q1` is normalized/denormalized within the `qpos` block
 - whenever generated trajectories are sent back to MuJoCo, `q0` is recovered with `atan2(sin(q0), cos(q0))`
 
+If you use the unbounded-`joint1` XML variant, then `joint1` becomes periodic too. In that case the current Reacher-specific DPF representation should be extended from `[sin(q0), cos(q0), q1]` to something like `[sin(q0), cos(q0), sin(q1), cos(q1)]` before training.
+
 ### 2. Do not wrap raw `q0` in the saved trajectories unless you really mean to
 
 Wrapping `q0` to `[-pi, pi]` creates a branch cut. If a trajectory crosses that cut, the time series gets an artificial jump. For sequence models, that can be worse than the large raw range.
@@ -124,7 +152,7 @@ For the current 40k/2k dataset run, the practical bottleneck was waypoint matchi
 
 ### 3.1 Joint-limit reactions are not recorded in `seq_torque`
 
-For the current non-dissipative Reacher XML, `joint1` still has a positional limit while `joint0` is unbounded. This matters for interpretation:
+For the bounded-`joint1` non-dissipative Reacher XML, `joint1` still has a positional limit while `joint0` is unbounded. This matters for interpretation:
 
 - `seq_torque` stores the actuator torque only
 - if `joint1` hits or pushes against its limit, MuJoCo can introduce an additional hidden constraint reaction
@@ -145,6 +173,7 @@ Implication:
 - this is usually acceptable for pure trajectory-generation training
 - it is more important if the dataset will be used for explicit forced-Hamiltonian identification or HNN-style consistency objectives
 - if strict `tau`-only forcing is desired, consider filtering out near-limit trajectories or using an unbounded `joint1`
+- if you use the unbounded-`joint1` XML variant, this hidden joint-limit reaction subtlety disappears for the arm joints
 
 ### 4. `dt` matters a lot for bidirectional consistency
 
