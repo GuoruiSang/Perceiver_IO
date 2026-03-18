@@ -109,6 +109,13 @@ def main():
                         help="Fixed trajectory length for non-DPF training (disables variable-length). "
                              "When set, all training samples use this exact length instead of random lengths from 100-1000.")
     parser.add_argument(
+        "--qpos_representation_override",
+        type=str,
+        default="auto",
+        choices=["auto", "raw", "reacher_q0q1_sincos"],
+        help="Override qpos representation used by the DPF dataset loader.",
+    )
+    parser.add_argument(
         "--conditioning_mode",
         type=str,
         default="adaln_torque",
@@ -219,8 +226,13 @@ def main():
     
     # Training mode - load dataset and setup training
     dataset_traj_length = args.fixed_trajectory_length if args.fixed_trajectory_length else 1000
+    qpos_representation_override = None if args.qpos_representation_override == "auto" else args.qpos_representation_override
     print(f"Loading dataset from {args.h5_path}...")
-    full_dataset = TrajectoryDPFCached(args.h5_path, trajectory_length=dataset_traj_length)
+    full_dataset = TrajectoryDPFCached(
+        args.h5_path,
+        trajectory_length=dataset_traj_length,
+        qpos_representation_override=qpos_representation_override,
+    )
 
     if args.max_trajectories > 0 and args.max_trajectories < len(full_dataset):
         dataset = torch.utils.data.Subset(full_dataset, range(args.max_trajectories))
@@ -251,13 +263,18 @@ def main():
     print(f"  conditioning_mode: {args.conditioning_mode}")
     print(f"  query_context_mode: {args.query_context_mode}")
     print(f"  token_layout: {args.token_layout}")
+    print(f"  qpos_representation_override: {args.qpos_representation_override}")
     
     # Create dataloaders:
     # - If val_h5_path is provided, keep strict split across files.
     # - Otherwise preserve existing behavior (random split from one file).
     if args.val_h5_path:
         print(f"Loading validation dataset from {args.val_h5_path}...")
-        val_dataset_full = TrajectoryDPFCached(args.val_h5_path, trajectory_length=dataset_traj_length)
+        val_dataset_full = TrajectoryDPFCached(
+            args.val_h5_path,
+            trajectory_length=dataset_traj_length,
+            qpos_representation_override=qpos_representation_override,
+        )
 
         # Guardrail: strict split only makes sense if dimensions align.
         val_sample = val_dataset_full[0]
@@ -449,6 +466,9 @@ def main():
             if args.token_layout != "aligned_tau":
                 layout_tag = f"layout-{args.token_layout}"
                 wandb_run_name = f"{wandb_run_name}_{layout_tag}" if wandb_run_name else layout_tag
+            if args.qpos_representation_override != "auto":
+                qpos_tag = f"qpos-{args.qpos_representation_override}"
+                wandb_run_name = f"{wandb_run_name}_{qpos_tag}" if wandb_run_name else qpos_tag
             logger = WandbLogger(
                 project=args.wandb_project,
                 name=wandb_run_name,
@@ -492,6 +512,7 @@ def main():
                 'conditioning_mode': args.conditioning_mode,
                 'query_context_mode': args.query_context_mode,
                 'token_layout': args.token_layout,
+                'qpos_representation_override': args.qpos_representation_override,
                 'fixed_trajectory_length': args.fixed_trajectory_length,
                 'trajectory_length_training_options': list(traj_length_options),
             })
@@ -508,10 +529,15 @@ def main():
         else ""
     )
     layout_tag = f"_layout-{args.token_layout}" if args.token_layout != "aligned_tau" else ""
+    qpos_tag = (
+        f"_qpos-{args.qpos_representation_override}"
+        if args.qpos_representation_override != "auto"
+        else ""
+    )
     length_tag = f"FixedTrajLength{args.fixed_trajectory_length}" if args.fixed_trajectory_length else "VariableTrajLength"
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.checkpoint_dir,
-        filename=f'trajectory_dpf_x0Stabilized&AbsoluteTimeEncoding&{length_tag}&UniformContext&EncoderNone&DecoderAttentions{backbone_tag}{conditioning_tag}{layout_tag}:{{epoch:03d}}_val_loss:{{val_loss:.4f}}',
+        filename=f'trajectory_dpf_x0Stabilized&AbsoluteTimeEncoding&{length_tag}&UniformContext&EncoderNone&DecoderAttentions{backbone_tag}{conditioning_tag}{layout_tag}{qpos_tag}:{{epoch:03d}}_val_loss:{{val_loss:.4f}}',
         every_n_epochs=args.checkpoint_every_n_epochs,
     )
     callbacks.append(checkpoint_callback)

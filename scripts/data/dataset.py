@@ -37,7 +37,7 @@ def infer_hnn_torque_alignment(h5_attrs) -> str:
     return "transition_next"
 
 class TrajectoryDPF(Dataset):
-    def __init__(self, h5_path: str):
+    def __init__(self, h5_path: str, qpos_representation_override: str | None = None):
         super().__init__()
         self.h5_path = h5_path
         self.metadata = {}
@@ -49,7 +49,11 @@ class TrajectoryDPF(Dataset):
         for k, v in self.h5_file.attrs.items():
             self.metadata[k] = v
         self.xml = self.metadata.get('xml', None)
-        self.qpos_representation = infer_qpos_representation_from_xml(self.xml)
+        self.qpos_representation = (
+            qpos_representation_override
+            if qpos_representation_override is not None
+            else infer_qpos_representation_from_xml(self.xml)
+        )
         if self.qpos_representation != RAW_QPOS:
             print(f"[TrajectoryDPF] Using qpos representation: {self.qpos_representation}")
 
@@ -212,7 +216,12 @@ class TrajectoryHNNCached(Dataset):
         }
 
 class TrajectoryDPFCached(Dataset):
-    def __init__(self, h5_path: str, trajectory_length: int = 500) -> None:
+    def __init__(
+        self,
+        h5_path: str,
+        trajectory_length: int = 500,
+        qpos_representation_override: str | None = None,
+    ) -> None:
         super().__init__()
 
         with h5py.File(h5_path, 'r') as f:
@@ -223,7 +232,11 @@ class TrajectoryDPFCached(Dataset):
             self.dt = f.attrs.get('dt', 0.0001)
             self.data_dt = f.attrs.get('data_dt', 0.0002)
             self.xml = f.attrs.get('xml', None)
-            self.qpos_representation = infer_qpos_representation_from_xml(self.xml)
+            self.qpos_representation = (
+                qpos_representation_override
+                if qpos_representation_override is not None
+                else infer_qpos_representation_from_xml(self.xml)
+            )
 
             # Pre-allocate and load all data at once
             self.all_seq_qpos, self.all_seq_mom, self.all_seq_torque = [], [], []
