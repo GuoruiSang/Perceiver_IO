@@ -57,6 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_diffusion_steps", type=int, default=100)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--fixed_prefix_len", type=int, default=None)
     parser.add_argument("--num_plot_examples", type=int, default=4)
     parser.add_argument(
         "--figure_name",
@@ -278,7 +279,11 @@ def main() -> None:
                     observed_qpos[batch_offset] = traj["seq_qpos"][:].astype(np.float32)
                     observed_mom[batch_offset] = traj["seq_mom"][:].astype(np.float32)
                     observed_torque[batch_offset] = traj["seq_torque"][:].astype(np.float32)
-                    prefix_len = int(traj.attrs["waypoint_index"])
+                    prefix_len = (
+                        int(args.fixed_prefix_len)
+                        if args.fixed_prefix_len is not None
+                        else int(traj.attrs["waypoint_index"])
+                    )
                     prefix_len = max(1, min(prefix_len, trajectory_length - 1))
                     prefix_lens.append(prefix_len)
                     waypoint_xy = traj["waypoint_xy"][:].astype(np.float64)
@@ -391,10 +396,13 @@ def main() -> None:
         "device": str(device),
         "seed": int(args.seed),
         "start_index": int(args.start_index),
+        "fixed_prefix_len": None if args.fixed_prefix_len is None else int(args.fixed_prefix_len),
         "num_trajectories": int(len(rows)),
         "num_diffusion_steps": int(args.num_diffusion_steps),
         "batch_size": int(args.batch_size),
         "aggregate": aggregate,
+        "suffix_mse_qpos_values": [float(row["suffix_mse_qpos"]) for row in rows],
+        "suffix_mse_mom_values": [float(row["suffix_mse_mom"]) for row in rows],
         "selected_examples": selected_examples,
     }
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
