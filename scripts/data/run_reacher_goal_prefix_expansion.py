@@ -95,6 +95,21 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--num_candidates", type=int, default=16)
+    parser.add_argument(
+        "--max_sampling_retries",
+        type=int,
+        default=3,
+        help=(
+            "If the best predicted suffix does not improve on the current goal distance, "
+            "sample another candidate batch up to this many retries."
+        ),
+    )
+    parser.add_argument(
+        "--retry_improvement_margin",
+        type=float,
+        default=1e-3,
+        help="Required predicted improvement margin to stop retrying candidate sampling.",
+    )
     parser.add_argument("--num_diffusion_steps", type=int, default=100)
     parser.add_argument("--goal_tolerance", type=float, default=0.01)
     parser.add_argument(
@@ -816,41 +831,76 @@ def main() -> None:
                         rollout_limit=rollout_limit,
                         lookahead_steps=int(args.lookahead_steps),
                     )
+                    current_goal_distance = float(rollout_goal_distances[-1])
+                    required_goal_distance = current_goal_distance - float(args.retry_improvement_margin)
+                    goal_xy_t = torch.as_tensor(goal_xy, dtype=torch.float32, device=device)
 
-                    local_seed = int(args.seed) + int(task["task_id"]) * 1000 + prefix_len
-                    torch.manual_seed(local_seed)
-                    np.random.seed(local_seed)
+                    best_candidate_idx = -1
+                    best_retry_idx = -1
+                    best_retry_seed = -1
+                    best_candidate_goal_distance = float("inf")
+                    best_generated_tau = None
+                    retry_trace: list[dict] = []
 
-                    with torch.no_grad():
-                        generated_state, generated_tau = model.sample_trajectories(
-                            num_samples=int(args.num_candidates),
-                            trajectory_length=sample_horizon,
-                            num_diffusion_steps=int(args.num_diffusion_steps),
-                            sample_mode="observed_prefix_completion",
-                            prefix_len=prefix_len,
-                            observed_qpos=observed_qpos[:, :sample_horizon, :],
-                            observed_mom=observed_mom[:, :sample_horizon, :],
-                            observed_torque=observed_tau[:, :sample_horizon, :],
-                            use_ema=False,
-                            sampler="ddim",
+                    for retry_idx in range(max(0, int(args.max_sampling_retries)) + 1):
+                        local_seed = (
+                            int(args.seed)
+                            + int(task["task_id"]) * 1000
+                            + prefix_len * 100
+                            + retry_idx
+                        )
+                        torch.manual_seed(local_seed)
+                        np.random.seed(local_seed)
+
+                        with torch.no_grad():
+                            generated_state, generated_tau = model.sample_trajectories(
+                                num_samples=int(args.num_candidates),
+                                trajectory_length=sample_horizon,
+                                num_diffusion_steps=int(args.num_diffusion_steps),
+                                sample_mode="observed_prefix_completion",
+                                prefix_len=prefix_len,
+                                observed_qpos=observed_qpos[:, :sample_horizon, :],
+                                observed_mom=observed_mom[:, :sample_horizon, :],
+                                observed_torque=observed_tau[:, :sample_horizon, :],
+                                use_ema=False,
+                                sampler="ddim",
+                            )
+
+                        candidate_qpos_model = generated_state[:, prefix_len:, : model.qpos_dim]
+                        candidate_qpos_raw = decode_qpos_tensor(candidate_qpos_model, model.qpos_representation)
+                        candidate_suffix_xy = fingertip_xy_from_qpos_tensor(candidate_qpos_raw)
+                        candidate_min_goal_dist = torch.linalg.norm(
+                            candidate_suffix_xy - goal_xy_t.view(1, 1, 2),
+                            dim=-1,
+                        ).amin(dim=1)
+                        retry_best_idx = int(torch.argmin(candidate_min_goal_dist).item())
+                        retry_best_dist = float(candidate_min_goal_dist[retry_best_idx].item())
+                        retry_trace.append(
+                            {
+                                "retry_idx": retry_idx,
+                                "sample_seed": local_seed,
+                                "best_candidate_idx": retry_best_idx,
+                                "best_predicted_goal_distance": retry_best_dist,
+                                "improved_over_current": bool(retry_best_dist < required_goal_distance),
+                            }
                         )
 
-                    candidate_qpos_model = generated_state[:, prefix_len:, : model.qpos_dim]
-                    candidate_qpos_raw = decode_qpos_tensor(candidate_qpos_model, model.qpos_representation)
-                    candidate_suffix_xy = fingertip_xy_from_qpos_tensor(candidate_qpos_raw)
-                    goal_xy_t = torch.as_tensor(goal_xy, dtype=candidate_suffix_xy.dtype, device=device)
-                    candidate_min_goal_dist = torch.linalg.norm(
-                        candidate_suffix_xy - goal_xy_t.view(1, 1, 2),
-                        dim=-1,
-                    ).amin(dim=1)
-                    best_candidate_idx = int(torch.argmin(candidate_min_goal_dist).item())
+                        if retry_best_dist < best_candidate_goal_distance:
+                            best_candidate_goal_distance = retry_best_dist
+                            best_candidate_idx = retry_best_idx
+                            best_retry_idx = retry_idx
+                            best_retry_seed = local_seed
+                            best_generated_tau = generated_tau.detach().cpu().numpy()
 
-                    applied_tau = (
-                        generated_tau[best_candidate_idx, prefix_len - 1]
-                        .detach()
-                        .cpu()
-                        .numpy()
-                        .astype(np.float64, copy=False)
+                        if retry_best_dist < required_goal_distance:
+                            break
+
+                    if best_generated_tau is None or best_candidate_idx < 0:
+                        raise RuntimeError("Adaptive retry loop failed to produce any candidate torque.")
+
+                    applied_tau = best_generated_tau[best_candidate_idx, prefix_len - 1].astype(
+                        np.float64,
+                        copy=False,
                     )
                     next_qpos_raw, next_mom = stepper.step(
                         qpos_raw=qpos_prefix_raw[-1],
@@ -878,9 +928,16 @@ def main() -> None:
                         {
                             "prefix_len_before_step": prefix_len,
                             "sample_horizon": int(sample_horizon),
-                            "sample_seed": local_seed,
+                            "sample_seed": best_retry_seed,
+                            "current_goal_distance": current_goal_distance,
+                            "required_goal_distance": required_goal_distance,
+                            "num_retries_used": best_retry_idx,
+                            "num_sampling_attempts": len(retry_trace),
+                            "total_candidates_evaluated": int(len(retry_trace) * int(args.num_candidates)),
+                            "retry_trace": retry_trace,
+                            "chosen_retry_idx": best_retry_idx,
                             "chosen_candidate_idx": best_candidate_idx,
-                            "chosen_candidate_best_goal_dist": float(candidate_min_goal_dist[best_candidate_idx].item()),
+                            "chosen_candidate_best_goal_dist": best_candidate_goal_distance,
                             "applied_tau": applied_tau.tolist(),
                             "result_goal_distance": next_goal_distance,
                         }
@@ -1012,6 +1069,8 @@ def main() -> None:
         "task_mode": str(args.task_mode),
         "task_ids": task_ids,
         "num_candidates": int(args.num_candidates),
+        "max_sampling_retries": int(args.max_sampling_retries),
+        "retry_improvement_margin": float(args.retry_improvement_margin),
         "num_diffusion_steps": int(args.num_diffusion_steps),
         "lookahead_steps": int(args.lookahead_steps),
         "goal_tolerance": float(args.goal_tolerance),
