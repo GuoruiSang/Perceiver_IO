@@ -227,6 +227,7 @@ class TrajectoryDPFSampling:
         observed_qpos: torch.Tensor = None,
         observed_mom: torch.Tensor = None,
         observed_torque: torch.Tensor = None,
+        time_indices: Optional[torch.Tensor] = None,
         use_ema: bool = True,
         sampler: str = "ddim",
         # CFG parameters
@@ -338,6 +339,12 @@ class TrajectoryDPFSampling:
         observed_torque = self._expand_sampling_tensor(
             observed_torque, num_samples, trajectory_length, self.torque_dim, "observed_torque"
         )
+        if time_indices is not None:
+            time_indices = time_indices.to(device=device, dtype=torch.long)
+            if time_indices.ndim != 1 or time_indices.shape[0] != trajectory_length:
+                raise ValueError(
+                    f"time_indices must have shape ({trajectory_length},), got {tuple(time_indices.shape)}"
+                )
 
         if resolved_sample_mode == "observed_prefix_completion":
             if observed_qpos is None or observed_mom is None:
@@ -489,7 +496,12 @@ class TrajectoryDPFSampling:
             """Predict epsilon with optional CFG for arbitrary batch size."""
             x_in = self._apply_observed_prefix_constraint(x_in, observed_prefix_state_norm, prefix_len)
             if self.unconditional_tau_in_state:
-                tokens = self.build_tokens(x_in, timestep_int + 1, skip_normalize=True)
+                tokens = self.build_tokens(
+                    x_in,
+                    timestep_int + 1,
+                    skip_normalize=True,
+                    time_indices=time_indices,
+                )
                 with torch.no_grad():
                     if self.backbone == "transformer":
                         return self.model(tokens)
@@ -497,20 +509,35 @@ class TrajectoryDPFSampling:
                     return self.model(contexts_local, tokens, torque=None)
             if self.backbone == "transformer":
                 cond_tokens = self.build_tokens(
-                    x_in, timestep_int + 1, skip_normalize=True, torque=cond_in, include_torque=True
+                    x_in,
+                    timestep_int + 1,
+                    skip_normalize=True,
+                    torque=cond_in,
+                    include_torque=True,
+                    time_indices=time_indices,
                 )
                 with torch.no_grad():
                     eps_cond_local = self.model(cond_tokens)
                 if guidance_scale != 1.0:
                     uncond_tokens = self.build_tokens(
-                        x_in, timestep_int + 1, skip_normalize=True, torque=cond_uncond_in, include_torque=True
+                        x_in,
+                        timestep_int + 1,
+                        skip_normalize=True,
+                        torque=cond_uncond_in,
+                        include_torque=True,
+                        time_indices=time_indices,
                     )
                     with torch.no_grad():
                         eps_uncond_local = self.model(uncond_tokens)
                     return eps_uncond_local + guidance_scale * (eps_cond_local - eps_uncond_local)
                 return eps_cond_local
 
-            queries_local = self.build_tokens(x_in, timestep_int + 1, skip_normalize=True)
+            queries_local = self.build_tokens(
+                x_in,
+                timestep_int + 1,
+                skip_normalize=True,
+                time_indices=time_indices,
+            )
             contexts_local = queries_local.index_select(dim=1, index=context_idx)
             with torch.no_grad():
                 eps_cond_local = self.model(contexts_local, queries_local, cond_in)
