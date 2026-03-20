@@ -61,8 +61,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--recent_window_lens",
         type=str,
-        default="200,100,50,20,10,4,1",
-        help="Comma-separated recent clean window lengths to test.",
+        default="",
+        help=(
+            "Comma-separated recent clean window lengths to test. "
+            "If empty, use min(split_prefix_len, recent_prefix_cap)."
+        ),
+    )
+    parser.add_argument(
+        "--recent_prefix_cap",
+        type=int,
+        default=256,
+        help=(
+            "Default recent clean prefix cap when recent_window_lens is not provided. "
+            "Use 0 or a negative value to keep the full split prefix."
+        ),
     )
     parser.add_argument(
         "--figure_name",
@@ -77,7 +89,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_window_lens(raw: str, split_prefix_len: int) -> list[int]:
+def parse_window_lens(raw: str, split_prefix_len: int, recent_prefix_cap: int) -> list[int]:
+    if not raw.strip():
+        if int(recent_prefix_cap) <= 0:
+            return [int(split_prefix_len)]
+        return [int(min(int(split_prefix_len), int(recent_prefix_cap)))]
     values = []
     for token in raw.split(","):
         token = token.strip()
@@ -156,7 +172,11 @@ def main() -> None:
         total_available = int(h5_file.attrs["num_trajectories"])
         trajectory_length = int(h5_file.attrs["num_steps"])
         split_prefix_len = max(1, min(int(args.split_prefix_len), trajectory_length - 1))
-        recent_window_lens = parse_window_lens(args.recent_window_lens, split_prefix_len=split_prefix_len)
+        recent_window_lens = parse_window_lens(
+            args.recent_window_lens,
+            split_prefix_len=split_prefix_len,
+            recent_prefix_cap=int(args.recent_prefix_cap),
+        )
 
         start_index = max(0, int(args.start_index))
         if start_index >= total_available:
@@ -270,6 +290,7 @@ def main() -> None:
         "num_diffusion_steps": int(args.num_diffusion_steps),
         "batch_size": int(args.batch_size),
         "split_prefix_len": int(split_prefix_len),
+        "recent_prefix_cap": int(args.recent_prefix_cap),
         "recent_window_lens": [int(v) for v in recent_window_lens],
         "rows": report_rows,
     }

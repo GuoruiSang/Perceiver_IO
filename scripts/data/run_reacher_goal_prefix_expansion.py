@@ -181,6 +181,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gif_fps", type=int, default=18)
     parser.add_argument("--gif_max_frames", type=int, default=200)
     parser.add_argument(
+        "--recent_prefix_cap",
+        type=int,
+        default=256,
+        help=(
+            "When sampling candidate suffixes, condition only on the most recent "
+            "min(current_prefix_len, recent_prefix_cap) clean steps. "
+            "Use 0 or a negative value to keep the full prefix."
+        ),
+    )
+    parser.add_argument(
         "--max_prefix_len",
         type=int,
         default=0,
@@ -340,6 +350,12 @@ def effective_sampling_horizon(prefix_len: int, rollout_limit: int, lookahead_st
     if int(lookahead_steps) <= 0:
         return int(rollout_limit)
     return int(min(rollout_limit, max(prefix_len + 1, prefix_len + int(lookahead_steps))))
+
+
+def effective_recent_prefix_len(prefix_len: int, recent_prefix_cap: int) -> int:
+    if int(recent_prefix_cap) <= 0:
+        return int(prefix_len)
+    return int(min(int(prefix_len), int(recent_prefix_cap)))
 
 
 def setup_workspace_axis(ax: plt.Axes, goal_xy: np.ndarray, goal_tolerance: float) -> None:
@@ -826,10 +842,22 @@ def main() -> None:
 
                 while len(qpos_prefix_raw) < rollout_limit and not reached_goal:
                     prefix_len = len(qpos_prefix_raw)
-                    sample_horizon = effective_sampling_horizon(
+                    sample_horizon_abs = effective_sampling_horizon(
                         prefix_len=prefix_len,
                         rollout_limit=rollout_limit,
                         lookahead_steps=int(args.lookahead_steps),
+                    )
+                    conditioning_prefix_len = effective_recent_prefix_len(
+                        prefix_len=prefix_len,
+                        recent_prefix_cap=int(args.recent_prefix_cap),
+                    )
+                    crop_start = prefix_len - conditioning_prefix_len
+                    sample_horizon = sample_horizon_abs - crop_start
+                    time_indices = torch.arange(
+                        crop_start,
+                        sample_horizon_abs,
+                        dtype=torch.long,
+                        device=device,
                     )
                     current_goal_distance = float(rollout_goal_distances[-1])
                     required_goal_distance = current_goal_distance - float(args.retry_improvement_margin)
@@ -858,15 +886,16 @@ def main() -> None:
                                 trajectory_length=sample_horizon,
                                 num_diffusion_steps=int(args.num_diffusion_steps),
                                 sample_mode="observed_prefix_completion",
-                                prefix_len=prefix_len,
-                                observed_qpos=observed_qpos[:, :sample_horizon, :],
-                                observed_mom=observed_mom[:, :sample_horizon, :],
-                                observed_torque=observed_tau[:, :sample_horizon, :],
+                                prefix_len=conditioning_prefix_len,
+                                observed_qpos=observed_qpos[:, crop_start:sample_horizon_abs, :],
+                                observed_mom=observed_mom[:, crop_start:sample_horizon_abs, :],
+                                observed_torque=observed_tau[:, crop_start:sample_horizon_abs, :],
+                                time_indices=time_indices,
                                 use_ema=False,
                                 sampler="ddim",
                             )
 
-                        candidate_qpos_model = generated_state[:, prefix_len:, : model.qpos_dim]
+                        candidate_qpos_model = generated_state[:, conditioning_prefix_len:, : model.qpos_dim]
                         candidate_qpos_raw = decode_qpos_tensor(candidate_qpos_model, model.qpos_representation)
                         candidate_suffix_xy = fingertip_xy_from_qpos_tensor(candidate_qpos_raw)
                         candidate_min_goal_dist = torch.linalg.norm(
@@ -898,7 +927,7 @@ def main() -> None:
                     if best_generated_tau is None or best_candidate_idx < 0:
                         raise RuntimeError("Adaptive retry loop failed to produce any candidate torque.")
 
-                    applied_tau = best_generated_tau[best_candidate_idx, prefix_len - 1].astype(
+                    applied_tau = best_generated_tau[best_candidate_idx, conditioning_prefix_len - 1].astype(
                         np.float64,
                         copy=False,
                     )
@@ -927,7 +956,10 @@ def main() -> None:
                     selection_trace.append(
                         {
                             "prefix_len_before_step": prefix_len,
+                            "conditioning_prefix_len": int(conditioning_prefix_len),
+                            "conditioning_crop_start": int(crop_start),
                             "sample_horizon": int(sample_horizon),
+                            "sample_horizon_absolute": int(sample_horizon_abs),
                             "sample_seed": best_retry_seed,
                             "current_goal_distance": current_goal_distance,
                             "required_goal_distance": required_goal_distance,
@@ -1024,6 +1056,7 @@ def main() -> None:
                     "num_candidates": int(args.num_candidates),
                     "num_diffusion_steps": int(args.num_diffusion_steps),
                     "lookahead_steps": int(args.lookahead_steps),
+                    "recent_prefix_cap": int(args.recent_prefix_cap),
                     "max_prefix_len": int(rollout_limit),
                     "steps_taken": int(len(rollout_qpos_raw)),
                     "reached_goal": bool(reached_goal),
@@ -1073,6 +1106,7 @@ def main() -> None:
         "retry_improvement_margin": float(args.retry_improvement_margin),
         "num_diffusion_steps": int(args.num_diffusion_steps),
         "lookahead_steps": int(args.lookahead_steps),
+        "recent_prefix_cap": int(args.recent_prefix_cap),
         "goal_tolerance": float(args.goal_tolerance),
         "max_prefix_len": int(args.max_prefix_len),
         "generator_defaults": generator_defaults,
