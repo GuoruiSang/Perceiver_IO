@@ -470,6 +470,7 @@ def compare_generated_with_reconstructed(
     name: str = None, trajectory_alignment: str = 'pre_step', return_series: bool = False,
     prefix_len: int = 0,
     qpos_representation: str = "raw",
+    highlight_indices: dict[str, int] | None = None,
 ) -> dict:
     """
     Compare generated trajectory with physics-reconstructed trajectory.
@@ -568,6 +569,8 @@ def compare_generated_with_reconstructed(
         fig.suptitle(f'MSE: qpos={mse_qpos:.6f}, mom={mse_mom:.6f}, total={mse_total:.6f}', fontsize=14, y=1.02)
         
         prefix_len = max(0, int(prefix_len))
+        highlight_items = list(highlight_indices.items()) if highlight_indices else []
+        highlight_colors = ['darkgreen', 'darkorange', 'purple', 'teal']
         for i, key in enumerate(keys):
             if key == 'seq_qpos':
                 gen_data = gen_qpos_plot
@@ -614,6 +617,24 @@ def compare_generated_with_reconstructed(
                         )
                     if prefix_end > 0:
                         axes[i, j].axvline(prefix_end - 1, color='gray', linestyle=':', linewidth=1.0)
+                    if highlight_items:
+                        for event_idx, (event_label, raw_index) in enumerate(highlight_items):
+                            event_index = int(raw_index)
+                            if 0 <= event_index < len(gen_data):
+                                color = highlight_colors[event_idx % len(highlight_colors)]
+                                axes[i, j].axvline(event_index, color=color, linestyle='--', linewidth=1.2, alpha=0.9)
+                                y_min, y_max = axes[i, j].get_ylim()
+                                axes[i, j].text(
+                                    event_index,
+                                    y_max,
+                                    event_label,
+                                    rotation=90,
+                                    va='top',
+                                    ha='right',
+                                    fontsize=8,
+                                    color=color,
+                                    bbox=dict(boxstyle='round,pad=0.15', facecolor='white', edgecolor='none', alpha=0.65),
+                                )
                     axes[i, j].set_title(f'{key}[{j}]')
                     axes[i, j].legend(markerscale=4, fontsize=9, loc='best')
             for j in range(gen_data.shape[-1], ncols):
