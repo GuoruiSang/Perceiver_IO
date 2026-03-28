@@ -150,6 +150,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--reset_window_time_indices",
+        action="store_true",
+        help=(
+            "Reset the cropped local window time indices to start at 0 at each rollout step. "
+            "By default, cropped windows keep absolute rollout-time indices."
+        ),
+    )
+    parser.add_argument(
         "--max_prefix_len",
         type=int,
         default=0,
@@ -765,12 +773,20 @@ def main() -> None:
                     )
                     crop_start = prefix_len - conditioning_prefix_len
                     sample_horizon = sample_horizon_abs - crop_start
-                    time_indices = torch.arange(
-                        crop_start,
-                        sample_horizon_abs,
-                        dtype=torch.long,
-                        device=device,
-                    )
+                    if bool(args.reset_window_time_indices):
+                        time_indices = torch.arange(
+                            0,
+                            sample_horizon,
+                            dtype=torch.long,
+                            device=device,
+                        )
+                    else:
+                        time_indices = torch.arange(
+                            crop_start,
+                            sample_horizon_abs,
+                            dtype=torch.long,
+                            device=device,
+                        )
                     current_goal_distance = float(rollout_goal_distances[-1])
                     required_goal_distance = current_goal_distance - float(args.retry_improvement_margin)
                     goal_xy_t = torch.as_tensor(goal_xy, dtype=torch.float32, device=device)
@@ -872,6 +888,7 @@ def main() -> None:
                             "conditioning_crop_start": int(crop_start),
                             "sample_horizon": int(sample_horizon),
                             "sample_horizon_absolute": int(sample_horizon_abs),
+                            "reset_window_time_indices": bool(args.reset_window_time_indices),
                             "sample_seed": best_retry_seed,
                             "current_goal_distance": current_goal_distance,
                             "required_goal_distance": required_goal_distance,
@@ -1019,6 +1036,7 @@ def main() -> None:
         "num_diffusion_steps": int(args.num_diffusion_steps),
         "lookahead_steps": int(args.lookahead_steps),
         "recent_prefix_cap": int(args.recent_prefix_cap),
+        "reset_window_time_indices": bool(args.reset_window_time_indices),
         "goal_tolerance": float(args.goal_tolerance),
         "max_prefix_len": int(args.max_prefix_len),
         "random_future_target_min_initial_distance": float(args.random_future_target_min_initial_distance),
