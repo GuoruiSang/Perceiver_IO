@@ -35,6 +35,9 @@ GOAL_COLOR = "#d62828"
 START_COLOR = "#2a9d8f"
 END_COLOR = "#264653"
 TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET = "validation_random_source_random_future_target_in_traj"
+TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_TARGET_ACROSS_TRAJS = (
+    "validation_random_source_random_target_across_trajs"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -72,7 +75,9 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Comma-separated task identifiers. "
             f"For task_mode={TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}, "
-            "these are dataset trajectory indices."
+            "these are dataset trajectory indices. "
+            f"For task_mode={TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_TARGET_ACROSS_TRAJS}, "
+            "these are RNG task seeds."
         ),
     )
     parser.add_argument(
@@ -81,18 +86,29 @@ def parse_args() -> argparse.Namespace:
         default=TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET,
         help=(
             "How to choose the goal and initial prefix state. "
-            f"Supported mode: {TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}."
+            f"Supported modes: {TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}, "
+            f"{TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_TARGET_ACROSS_TRAJS}."
         ),
     )
     parser.add_argument("--num_candidates", type=int, default=16)
     parser.add_argument(
         "--random_future_target_min_initial_distance",
         type=float,
-        default=0.0,
+        default=0.1,
         help=(
             f"Minimum start-to-goal end-effector distance for "
-            f"{TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}. "
+            f"{TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET} and "
+            f"{TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_TARGET_ACROSS_TRAJS}. "
             "Use 0 to disable the filter."
+        ),
+    )
+    parser.add_argument(
+        "--cross_traj_sampling_max_tries",
+        type=int,
+        default=128,
+        help=(
+            f"Maximum random source/target-pair sampling attempts for "
+            f"{TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_TARGET_ACROSS_TRAJS}."
         ),
     )
     parser.add_argument(
@@ -157,9 +173,14 @@ def parse_indices(text: str) -> list[int]:
 
 
 def normalize_task_mode(task_mode: str) -> str:
-    if task_mode != TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET:
+    if task_mode not in {
+        TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET,
+        TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_TARGET_ACROSS_TRAJS,
+    }:
         raise ValueError(
-            f"Unsupported task_mode={task_mode!r}. Supported value: {TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}"
+            f"Unsupported task_mode={task_mode!r}. Supported values: "
+            f"{TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}, "
+            f"{TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_TARGET_ACROSS_TRAJS}"
         )
     return task_mode
 
@@ -546,6 +567,95 @@ def build_validation_random_source_random_future_target_task(
     }
 
 
+def build_validation_random_source_random_target_across_trajs_task(
+    *,
+    h5_file: h5py.File,
+    task_seed: int,
+    rollout_limit: int,
+    min_initial_distance: float,
+    max_tries: int,
+) -> dict:
+    traj_names = sorted(
+        (name for name in h5_file.keys() if name.startswith("traj_")),
+        key=lambda name: int(name.split("_")[1]),
+    )
+    if not traj_names:
+        raise ValueError("No trajectory groups found in validation HDF5.")
+
+    rng = np.random.default_rng(int(task_seed))
+    min_initial_distance = float(min_initial_distance)
+    max_tries = max(1, int(max_tries))
+
+    for _ in range(max_tries):
+        source_name = traj_names[int(rng.integers(0, len(traj_names)))]
+        target_name = traj_names[int(rng.integers(0, len(traj_names)))]
+        source_traj = h5_file[source_name]
+        target_traj = h5_file[target_name]
+
+        source_qpos_raw_full = source_traj["seq_qpos"][:].astype(np.float64)
+        source_mom_full = source_traj["seq_mom"][:].astype(np.float64)
+        if "seq_fingertip_xy" in source_traj:
+            source_ee_xy_full = source_traj["seq_fingertip_xy"][:].astype(np.float64)
+        else:
+            source_ee_xy_full = fingertip_xy_from_qpos_raw(source_qpos_raw_full)
+
+        if "seq_fingertip_xy" in target_traj:
+            target_ee_xy_full = target_traj["seq_fingertip_xy"][:].astype(np.float64)
+        else:
+            target_ee_xy_full = fingertip_xy_from_qpos_raw(target_traj["seq_qpos"][:].astype(np.float64))
+
+        if source_qpos_raw_full.shape[0] < 2 or target_ee_xy_full.shape[0] < 1:
+            continue
+
+        source_index = int(rng.integers(0, source_qpos_raw_full.shape[0] - 1))
+        target_index = int(rng.integers(0, target_ee_xy_full.shape[0]))
+        goal_xy = target_ee_xy_full[target_index].astype(np.float64, copy=False)
+        initial_goal_distance = float(np.linalg.norm(source_ee_xy_full[source_index] - goal_xy))
+        if initial_goal_distance < min_initial_distance:
+            continue
+
+        remaining_len = int(source_qpos_raw_full.shape[0] - source_index)
+        task_rollout_limit = max(2, min(int(rollout_limit), remaining_len))
+        replay_qpos_raw = source_qpos_raw_full[source_index : source_index + task_rollout_limit]
+        replay_mom = source_mom_full[source_index : source_index + task_rollout_limit]
+        source_traj_index = int(source_name.split("_")[1])
+        target_traj_index = int(target_name.split("_")[1])
+        same_traj = source_traj_index == target_traj_index
+
+        return {
+            "task_id": int(task_seed),
+            "task_label": (
+                f"src{source_traj_index:04d}_t{source_index:04d}_"
+                f"goal{target_traj_index:04d}_t{target_index:04d}"
+            ),
+            "task_mode": TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_TARGET_ACROSS_TRAJS,
+            "goal_xy": goal_xy,
+            "initial_qpos_raw": replay_qpos_raw[0].copy(),
+            "initial_mom": replay_mom[0].copy(),
+            "reference_qpos_raw": replay_qpos_raw,
+            "reference_mom": replay_mom,
+            "reference_waypoint_index": None,
+            "rollout_limit": int(task_rollout_limit),
+            "metadata": {
+                "task_seed": int(task_seed),
+                "source_traj_index": int(source_traj_index),
+                "source_index": int(source_index),
+                "target_traj_index": int(target_traj_index),
+                "target_index": int(target_index),
+                "same_traj": bool(same_traj),
+                "initial_goal_distance": float(initial_goal_distance),
+                "rollout_budget_capped": bool(task_rollout_limit < remaining_len),
+                "sampling_mode": "independent_random_target_across_validation_trajectories",
+            },
+        }
+
+    raise ValueError(
+        "Failed to sample a valid cross-trajectory source/target pair "
+        f"with initial distance >= {min_initial_distance:.6f} m "
+        f"after {max_tries} tries."
+    )
+
+
 def main() -> None:
     args = parse_args()
     args.task_mode = normalize_task_mode(args.task_mode)
@@ -586,13 +696,22 @@ def main() -> None:
             stepper = ReacherRolloutStepper(mj_model, dt=float(model.dt), data_dt=float(model.data_dt))
             summary_rows: list[dict] = []
             for task_id in task_ids:
-                task = build_validation_random_source_random_future_target_task(
-                    h5_file=h5_file,
-                    traj_index=int(task_id),
-                    rollout_limit=rollout_limit,
-                    task_seed=int(args.seed) + int(task_id),
-                    min_initial_distance=float(args.random_future_target_min_initial_distance),
-                )
+                if args.task_mode == TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET:
+                    task = build_validation_random_source_random_future_target_task(
+                        h5_file=h5_file,
+                        traj_index=int(task_id),
+                        rollout_limit=rollout_limit,
+                        task_seed=int(args.seed) + int(task_id),
+                        min_initial_distance=float(args.random_future_target_min_initial_distance),
+                    )
+                else:
+                    task = build_validation_random_source_random_target_across_trajs_task(
+                        h5_file=h5_file,
+                        task_seed=int(args.seed) + int(task_id),
+                        rollout_limit=rollout_limit,
+                        min_initial_distance=float(args.random_future_target_min_initial_distance),
+                        max_tries=int(args.cross_traj_sampling_max_tries),
+                    )
 
                 goal_xy = np.asarray(task["goal_xy"], dtype=np.float64)
                 initial_qpos_raw = np.asarray(task["initial_qpos_raw"], dtype=np.float64)
@@ -902,7 +1021,7 @@ def main() -> None:
         "recent_prefix_cap": int(args.recent_prefix_cap),
         "goal_tolerance": float(args.goal_tolerance),
         "max_prefix_len": int(args.max_prefix_len),
-        "generator_defaults": generator_defaults,
+        "random_future_target_min_initial_distance": float(args.random_future_target_min_initial_distance),
         "aggregate": {
             "success_rate": float(np.mean([float(row["reached_goal"]) for row in summary_rows])),
             "best_goal_distance": aggregate_metric(summary_rows, "best_goal_distance"),
