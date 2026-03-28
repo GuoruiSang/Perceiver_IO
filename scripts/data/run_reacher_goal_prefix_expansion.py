@@ -22,14 +22,7 @@ import mujoco
 import numpy as np
 import torch
 
-from scripts.data.generate_bidirectional_reacher_dataset import (
-    generate_smooth_torque,
-    get_model_ids,
-    ik_2link,
-    sample_waypoint_in_disk,
-    set_reacher_state,
-    simulate_helper_segment,
-)
+from scripts.data.generate_bidirectional_reacher_dataset import get_model_ids
 from src.models.trajectory_dpf_model import TrajectoryDPF
 from src.qpos_representation import decode_qpos_tensor, encode_qpos_array
 
@@ -41,9 +34,7 @@ EE_PATH_COLOR = "#f4a261"
 GOAL_COLOR = "#d62828"
 START_COLOR = "#2a9d8f"
 END_COLOR = "#264653"
-TASK_MODE_DATASET = "goal&initial_state_from_dataset"
-TASK_MODE_SAME_METHOD = "goal&initial_state_from_same_dataset_method"
-TASK_MODE_INDEPENDENT = "goal&initial_state_from_independent_sampling"
+TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET = "validation_random_source_random_future_target_in_traj"
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,21 +71,30 @@ def parse_args() -> argparse.Namespace:
         default="313,267,787,338",
         help=(
             "Comma-separated task identifiers. "
-            f"For task_mode={TASK_MODE_DATASET}, these are dataset trajectory indices. "
-            f"For task_mode={TASK_MODE_SAME_METHOD} or {TASK_MODE_INDEPENDENT}, these are RNG seeds."
+            f"For task_mode={TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}, "
+            "these are dataset trajectory indices."
         ),
     )
     parser.add_argument(
         "--task_mode",
         type=str,
-        default=TASK_MODE_DATASET,
+        default=TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET,
         help=(
             "How to choose the goal and initial prefix state. "
-            f"Canonical modes: {TASK_MODE_DATASET}, {TASK_MODE_SAME_METHOD}, {TASK_MODE_INDEPENDENT}. "
-            "Older aliases are still accepted."
+            f"Supported mode: {TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}."
         ),
     )
     parser.add_argument("--num_candidates", type=int, default=16)
+    parser.add_argument(
+        "--random_future_target_min_initial_distance",
+        type=float,
+        default=0.0,
+        help=(
+            f"Minimum start-to-goal end-effector distance for "
+            f"{TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}. "
+            "Use 0 to disable the filter."
+        ),
+    )
     parser.add_argument(
         "--max_sampling_retries",
         type=int,
@@ -113,33 +113,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_diffusion_steps", type=int, default=100)
     parser.add_argument("--goal_tolerance", type=float, default=0.01)
     parser.add_argument(
-        "--waypoint_radius",
-        type=float,
-        default=None,
-        help=(
-            f"Goal sampling radius for {TASK_MODE_SAME_METHOD} and {TASK_MODE_INDEPENDENT}. "
-            "Default: from dataset generator config or 0.18."
-        ),
-    )
-    parser.add_argument(
-        "--waypoint_qvel_scale",
-        type=float,
-        default=None,
-        help=(
-            f"Waypoint-velocity scale for {TASK_MODE_SAME_METHOD}. "
-            "Default: from dataset generator config or 0.8."
-        ),
-    )
-    parser.add_argument(
-        "--torque_scale",
-        type=float,
-        default=None,
-        help=(
-            f"Torque scale for {TASK_MODE_SAME_METHOD}. "
-            "Default: from dataset generator config or 0.2."
-        ),
-    )
-    parser.add_argument(
         "--lookahead_steps",
         type=int,
         default=0,
@@ -147,36 +120,6 @@ def parse_args() -> argparse.Namespace:
             "Sample only prefix_len + lookahead_steps timesteps for candidate scoring. "
             "Use 0 or a negative value to keep full-horizon sampling."
         ),
-    )
-    parser.add_argument(
-        "--ood_qpos_quantile_low",
-        type=float,
-        default=0.01,
-        help=f"Lower quantile for independent qpos sampling in {TASK_MODE_INDEPENDENT} mode.",
-    )
-    parser.add_argument(
-        "--ood_qpos_quantile_high",
-        type=float,
-        default=0.99,
-        help=f"Upper quantile for independent qpos sampling in {TASK_MODE_INDEPENDENT} mode.",
-    )
-    parser.add_argument(
-        "--ood_mom_quantile_low",
-        type=float,
-        default=0.01,
-        help=f"Lower quantile for independent momentum sampling in {TASK_MODE_INDEPENDENT} mode.",
-    )
-    parser.add_argument(
-        "--ood_mom_quantile_high",
-        type=float,
-        default=0.99,
-        help=f"Upper quantile for independent momentum sampling in {TASK_MODE_INDEPENDENT} mode.",
-    )
-    parser.add_argument(
-        "--ood_stats_trajectories",
-        type=int,
-        default=2000,
-        help="Maximum number of dataset trajectories to use when estimating OOD sampling bounds.",
     )
     parser.add_argument("--gif_fps", type=int, default=18)
     parser.add_argument("--gif_max_frames", type=int, default=200)
@@ -214,10 +157,10 @@ def parse_indices(text: str) -> list[int]:
 
 
 def normalize_task_mode(task_mode: str) -> str:
-    valid_modes = [TASK_MODE_DATASET, TASK_MODE_SAME_METHOD, TASK_MODE_INDEPENDENT]
-    if task_mode not in valid_modes:
-        valid = ", ".join(valid_modes)
-        raise ValueError(f"Unsupported task_mode={task_mode!r}. Supported values: {valid}")
+    if task_mode != TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET:
+        raise ValueError(
+            f"Unsupported task_mode={task_mode!r}. Supported value: {TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET}"
+        )
     return task_mode
 
 
@@ -251,37 +194,6 @@ def arm_points_from_qpos_raw(qpos_raw: np.ndarray) -> np.ndarray:
         dtype=np.float64,
     )
     return np.stack([np.zeros(2, dtype=np.float64), elbow, tip], axis=0)
-
-
-def resolve_generator_defaults(h5_file: h5py.File, args: argparse.Namespace) -> dict[str, float]:
-    config_raw = h5_file.attrs.get("generator_config", "")
-    config = json.loads(config_raw) if config_raw else {}
-    return {
-        "waypoint_radius": float(
-            args.waypoint_radius if args.waypoint_radius is not None else config.get("waypoint_radius", 0.18)
-        ),
-        "waypoint_qvel_scale": float(
-            args.waypoint_qvel_scale
-            if args.waypoint_qvel_scale is not None
-            else config.get("waypoint_qvel_scale", 0.8)
-        ),
-        "torque_scale": float(args.torque_scale if args.torque_scale is not None else config.get("torque_scale", 0.2)),
-    }
-
-
-def compute_arm_momentum_from_qvel(
-    model: mujoco.MjModel,
-    ids: dict[str, int],
-    arm_qpos: np.ndarray,
-    arm_qvel: np.ndarray,
-    waypoint_xy: np.ndarray,
-) -> np.ndarray:
-    data = mujoco.MjData(model)
-    set_reacher_state(model, data, arm_qpos, arm_qvel, waypoint_xy, ids)
-    mass = np.zeros((model.nv, model.nv), dtype=np.float64)
-    mujoco.mj_fullM(model, mass, data.qM)
-    mom = mass @ data.qvel
-    return mom[[ids["joint0_dof"], ids["joint1_dof"]]].astype(np.float64, copy=False)
 
 
 def compute_initial_qvel(model: mujoco.MjModel, qpos_raw: np.ndarray, mom: np.ndarray) -> np.ndarray:
@@ -561,155 +473,75 @@ def aggregate_metric(rows: list[dict], key: str) -> dict[str, float]:
     }
 
 
-def estimate_ood_state_bounds(
-    h5_file: h5py.File,
-    max_trajectories: int,
-    qpos_quantiles: tuple[float, float],
-    mom_quantiles: tuple[float, float],
-) -> dict[str, np.ndarray]:
-    traj_names = sorted(
-        (name for name in h5_file.keys() if name.startswith("traj_")),
-        key=lambda name: int(name.split("_")[1]),
-    )[: max(1, int(max_trajectories))]
-    qpos_samples = []
-    mom_samples = []
-    for name in traj_names:
-        traj = h5_file[name]
-        qpos_samples.append(traj["seq_qpos"][:].astype(np.float64, copy=False))
-        mom_samples.append(traj["seq_mom"][:].astype(np.float64, copy=False))
-    qpos_flat = np.concatenate(qpos_samples, axis=0)
-    mom_flat = np.concatenate(mom_samples, axis=0)
-    return {
-        "qpos_low": np.quantile(qpos_flat, qpos_quantiles[0], axis=0),
-        "qpos_high": np.quantile(qpos_flat, qpos_quantiles[1], axis=0),
-        "mom_low": np.quantile(mom_flat, mom_quantiles[0], axis=0),
-        "mom_high": np.quantile(mom_flat, mom_quantiles[1], axis=0),
-        "num_trajectories_used": np.array([len(traj_names)], dtype=np.int64),
-    }
-
-
-def build_dataset_start_task(
+def build_validation_random_source_random_future_target_task(
     *,
     h5_file: h5py.File,
     traj_index: int,
     rollout_limit: int,
-    model: TrajectoryDPF,
+    task_seed: int,
+    min_initial_distance: float,
 ) -> dict:
     traj = h5_file[f"traj_{traj_index}"]
-    replay_qpos_raw = traj["seq_qpos"][:rollout_limit].astype(np.float64)
-    replay_mom = traj["seq_mom"][:rollout_limit].astype(np.float64)
-    goal_xy = traj["waypoint_xy"][:].astype(np.float64)
+    full_qpos_raw = traj["seq_qpos"][:].astype(np.float64)
+    full_mom = traj["seq_mom"][:].astype(np.float64)
+    if "seq_fingertip_xy" in traj:
+        full_ee_xy = traj["seq_fingertip_xy"][:].astype(np.float64)
+    else:
+        full_ee_xy = fingertip_xy_from_qpos_raw(full_qpos_raw)
+
+    traj_len = int(full_qpos_raw.shape[0])
+    if traj_len < 2:
+        raise ValueError(f"trajectory {traj_index} is too short for random source/target sampling")
+
+    rng = np.random.default_rng(int(task_seed))
+    min_initial_distance = float(min_initial_distance)
+    valid_pairs: list[tuple[int, np.ndarray]] = []
+    for source_index in range(traj_len - 1):
+        future_distances = np.linalg.norm(full_ee_xy[source_index + 1 :] - full_ee_xy[source_index], axis=1)
+        if min_initial_distance > 0.0:
+            valid_offsets = np.flatnonzero(future_distances >= min_initial_distance)
+        else:
+            valid_offsets = np.arange(future_distances.shape[0], dtype=np.int64)
+        if valid_offsets.size > 0:
+            valid_pairs.append((source_index, valid_offsets))
+
+    if not valid_pairs:
+        raise ValueError(
+            f"trajectory {traj_index} has no source/future-target pair "
+            f"with initial distance >= {min_initial_distance:.6f} m"
+        )
+
+    pair_choice = int(rng.integers(0, len(valid_pairs)))
+    source_index, valid_offsets = valid_pairs[pair_choice]
+    offset_choice = int(rng.integers(0, int(valid_offsets.size)))
+    target_index = int(source_index + 1 + int(valid_offsets[offset_choice]))
+
+    remaining_len = traj_len - source_index
+    task_rollout_limit = max(2, min(int(rollout_limit), remaining_len))
+    replay_qpos_raw = full_qpos_raw[source_index : source_index + task_rollout_limit]
+    replay_mom = full_mom[source_index : source_index + task_rollout_limit]
+    goal_xy = full_ee_xy[target_index].astype(np.float64, copy=False)
+    initial_goal_distance = float(np.linalg.norm(full_ee_xy[source_index] - goal_xy))
+
     return {
         "task_id": int(traj_index),
-        "task_label": f"traj_{traj_index:04d}",
-        "task_mode": TASK_MODE_DATASET,
+        "task_label": f"traj_{traj_index:04d}_t{source_index:04d}_rt{target_index:04d}",
+        "task_mode": TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET,
         "goal_xy": goal_xy,
         "initial_qpos_raw": replay_qpos_raw[0].copy(),
         "initial_mom": replay_mom[0].copy(),
         "reference_qpos_raw": replay_qpos_raw,
         "reference_mom": replay_mom,
-        "reference_waypoint_index": int(traj.attrs.get("waypoint_index", -1)),
+        "reference_waypoint_index": int(target_index - source_index),
+        "rollout_limit": int(task_rollout_limit),
         "metadata": {
             "traj_index": int(traj_index),
-            "waypoint_index": int(traj.attrs.get("waypoint_index", -1)),
-            "waypoint_error": float(traj.attrs.get("waypoint_error", np.nan)),
-        },
-    }
-
-
-def build_generator_id_task(
-    *,
-    task_seed: int,
-    rollout_limit: int,
-    mj_model: mujoco.MjModel,
-    ids: dict[str, int],
-    generator_defaults: dict[str, float],
-) -> dict:
-    rng = np.random.default_rng(int(task_seed))
-    waypoint_xy = sample_waypoint_in_disk(rng, max_radius=float(generator_defaults["waypoint_radius"]))
-    elbow_branch = 1 if rng.random() < 0.5 else -1
-    arm_qpos = ik_2link(waypoint_xy, elbow_branch=elbow_branch)
-    arm_qvel = rng.uniform(
-        -float(generator_defaults["waypoint_qvel_scale"]),
-        float(generator_defaults["waypoint_qvel_scale"]),
-        size=2,
-    )
-    prefix_steps = int(rng.integers(1, rollout_limit - 1))
-    full_tau = generate_smooth_torque(
-        rng,
-        rollout_limit,
-        float(mj_model.opt.timestep),
-        mj_model.nu,
-        float(generator_defaults["torque_scale"]),
-    )
-    prefix_helper_tau = full_tau[:prefix_steps][::-1].copy()
-    prefix_qpos_helper, prefix_qvel_helper = simulate_helper_segment(
-        model=mj_model,
-        arm_qpos=arm_qpos,
-        arm_qvel=-arm_qvel,
-        waypoint_xy=waypoint_xy,
-        torque_seq=prefix_helper_tau,
-        ids=ids,
-    )
-    start_arm_qpos = prefix_qpos_helper[-1, [ids["joint0_qpos"], ids["joint1_qpos"]]]
-    start_arm_qvel = -prefix_qvel_helper[-1, [ids["joint0_dof"], ids["joint1_dof"]]]
-    start_arm_mom = compute_arm_momentum_from_qvel(
-        mj_model,
-        ids,
-        arm_qpos=start_arm_qpos,
-        arm_qvel=start_arm_qvel,
-        waypoint_xy=waypoint_xy,
-    )
-    return {
-        "task_id": int(task_seed),
-        "task_label": f"id_seed_{task_seed:06d}",
-        "task_mode": TASK_MODE_SAME_METHOD,
-        "goal_xy": waypoint_xy.astype(np.float64),
-        "initial_qpos_raw": start_arm_qpos.astype(np.float64, copy=False),
-        "initial_mom": start_arm_mom.astype(np.float64, copy=False),
-        "reference_qpos_raw": None,
-        "reference_mom": None,
-        "reference_waypoint_index": prefix_steps,
-        "metadata": {
             "task_seed": int(task_seed),
-            "waypoint_index": int(prefix_steps),
-            "elbow_branch": int(elbow_branch),
-            "waypoint_qvel": arm_qvel.astype(np.float64).tolist(),
-        },
-    }
-
-
-def build_ood_random_state_task(
-    *,
-    task_seed: int,
-    mj_model: mujoco.MjModel,
-    generator_defaults: dict[str, float],
-    qpos_bounds: tuple[np.ndarray, np.ndarray],
-    mom_bounds: tuple[np.ndarray, np.ndarray],
-) -> dict:
-    rng = np.random.default_rng(int(task_seed))
-    goal_xy = sample_waypoint_in_disk(rng, max_radius=float(generator_defaults["waypoint_radius"]))
-    qpos_low, qpos_high = qpos_bounds
-    mom_low, mom_high = mom_bounds
-    initial_qpos_raw = rng.uniform(qpos_low, qpos_high).astype(np.float64)
-    initial_mom = rng.uniform(mom_low, mom_high).astype(np.float64)
-    return {
-        "task_id": int(task_seed),
-        "task_label": f"ood_seed_{task_seed:06d}",
-        "task_mode": TASK_MODE_INDEPENDENT,
-        "goal_xy": goal_xy.astype(np.float64),
-        "initial_qpos_raw": initial_qpos_raw,
-        "initial_mom": initial_mom,
-        "reference_qpos_raw": None,
-        "reference_mom": None,
-        "reference_waypoint_index": None,
-        "metadata": {
-            "task_seed": int(task_seed),
-            "qpos_range_low": np.asarray(qpos_low, dtype=np.float64).tolist(),
-            "qpos_range_high": np.asarray(qpos_high, dtype=np.float64).tolist(),
-            "mom_range_low": np.asarray(mom_low, dtype=np.float64).tolist(),
-            "mom_range_high": np.asarray(mom_high, dtype=np.float64).tolist(),
-            "nu": int(mj_model.nu),
+            "source_index": int(source_index),
+            "target_index": int(target_index),
+            "delta_t": int(target_index - source_index),
+            "initial_goal_distance": float(initial_goal_distance),
+            "rollout_budget_capped": bool(task_rollout_limit < remaining_len),
         },
     }
 
@@ -752,61 +584,22 @@ def main() -> None:
             mj_model = mujoco.MjModel.from_xml_path(str(xml_path))
             ids = get_model_ids(mj_model)
             stepper = ReacherRolloutStepper(mj_model, dt=float(model.dt), data_dt=float(model.data_dt))
-            generator_defaults = resolve_generator_defaults(h5_file, args)
-            ood_bounds = None
-            if args.task_mode == TASK_MODE_INDEPENDENT:
-                bounds = estimate_ood_state_bounds(
-                    h5_file,
-                    max_trajectories=int(args.ood_stats_trajectories),
-                    qpos_quantiles=(float(args.ood_qpos_quantile_low), float(args.ood_qpos_quantile_high)),
-                    mom_quantiles=(float(args.ood_mom_quantile_low), float(args.ood_mom_quantile_high)),
-                )
-                ood_bounds = (
-                    (bounds["qpos_low"], bounds["qpos_high"]),
-                    (bounds["mom_low"], bounds["mom_high"]),
-                )
-                print(
-                    "[GoalExpand] OOD bounds from {} trajectories: qpos_low={} qpos_high={} mom_low={} mom_high={}".format(
-                        int(bounds["num_trajectories_used"][0]),
-                        np.asarray(bounds["qpos_low"]).tolist(),
-                        np.asarray(bounds["qpos_high"]).tolist(),
-                        np.asarray(bounds["mom_low"]).tolist(),
-                        np.asarray(bounds["mom_high"]).tolist(),
-                    )
-                )
-
             summary_rows: list[dict] = []
             for task_id in task_ids:
-                if args.task_mode == TASK_MODE_DATASET:
-                    task = build_dataset_start_task(
-                        h5_file=h5_file,
-                        traj_index=int(task_id),
-                        rollout_limit=rollout_limit,
-                        model=model,
-                    )
-                elif args.task_mode == TASK_MODE_SAME_METHOD:
-                    task = build_generator_id_task(
-                        task_seed=int(args.seed) + int(task_id),
-                        rollout_limit=rollout_limit,
-                        mj_model=mj_model,
-                        ids=ids,
-                        generator_defaults=generator_defaults,
-                    )
-                else:
-                    assert ood_bounds is not None
-                    task = build_ood_random_state_task(
-                        task_seed=int(args.seed) + int(task_id),
-                        mj_model=mj_model,
-                        generator_defaults=generator_defaults,
-                        qpos_bounds=ood_bounds[0],
-                        mom_bounds=ood_bounds[1],
-                    )
+                task = build_validation_random_source_random_future_target_task(
+                    h5_file=h5_file,
+                    traj_index=int(task_id),
+                    rollout_limit=rollout_limit,
+                    task_seed=int(args.seed) + int(task_id),
+                    min_initial_distance=float(args.random_future_target_min_initial_distance),
+                )
 
                 goal_xy = np.asarray(task["goal_xy"], dtype=np.float64)
                 initial_qpos_raw = np.asarray(task["initial_qpos_raw"], dtype=np.float64)
                 initial_mom = np.asarray(task["initial_mom"], dtype=np.float64)
                 reference_qpos_raw = task["reference_qpos_raw"]
                 reference_mom = task["reference_mom"]
+                task_rollout_limit = int(task.get("rollout_limit", rollout_limit))
 
                 initial_qpos_model = encode_qpos_array(
                     initial_qpos_raw[None, :].astype(np.float32),
@@ -823,28 +616,28 @@ def main() -> None:
                 selection_trace: list[dict] = []
                 reached_goal = rollout_goal_distances[-1] <= float(args.goal_tolerance)
                 observed_qpos = torch.zeros(
-                    (1, rollout_limit, model.qpos_dim),
+                    (1, task_rollout_limit, model.qpos_dim),
                     dtype=torch.float32,
                     device=device,
                 )
                 observed_mom = torch.zeros(
-                    (1, rollout_limit, model.mom_dim),
+                    (1, task_rollout_limit, model.mom_dim),
                     dtype=torch.float32,
                     device=device,
                 )
                 observed_tau = torch.zeros(
-                    (1, rollout_limit, model.torque_dim),
+                    (1, task_rollout_limit, model.torque_dim),
                     dtype=torch.float32,
                     device=device,
                 )
                 observed_qpos[0, 0] = torch.from_numpy(initial_qpos_model).to(device=device)
                 observed_mom[0, 0] = torch.from_numpy(initial_mom_f32).to(device=device)
 
-                while len(qpos_prefix_raw) < rollout_limit and not reached_goal:
+                while len(qpos_prefix_raw) < task_rollout_limit and not reached_goal:
                     prefix_len = len(qpos_prefix_raw)
                     sample_horizon_abs = effective_sampling_horizon(
                         prefix_len=prefix_len,
-                        rollout_limit=rollout_limit,
+                        rollout_limit=task_rollout_limit,
                         lookahead_steps=int(args.lookahead_steps),
                     )
                     conditioning_prefix_len = effective_recent_prefix_len(
@@ -1057,7 +850,7 @@ def main() -> None:
                     "num_diffusion_steps": int(args.num_diffusion_steps),
                     "lookahead_steps": int(args.lookahead_steps),
                     "recent_prefix_cap": int(args.recent_prefix_cap),
-                    "max_prefix_len": int(rollout_limit),
+                    "max_prefix_len": int(task_rollout_limit),
                     "steps_taken": int(len(rollout_qpos_raw)),
                     "reached_goal": bool(reached_goal),
                     "best_goal_distance": float(rollout_goal_dist.min()),
