@@ -9,6 +9,7 @@ from tqdm import tqdm
 import math
 import json
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import CubicSpline
 
@@ -17,6 +18,9 @@ from scipy.interpolate import CubicSpline
 _WORKER_MODEL = None
 _WORKER_XML_PATH = None
 _WORKER_DT = None
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PLOTS_DIR = PROJECT_ROOT / "plots"
+DATA_DIR = PROJECT_ROOT / "data"
 
 TRAJ_KEYS = ['seq_qpos', 'seq_qvel', 'seq_qacc', 'seq_mom', 'seq_mom_dot', 'seq_torque', 'seq_energy']
 
@@ -869,7 +873,8 @@ def plot_coverage(results):
         for i in range(nrows):
             for j in range(ncols):
                 axes[i, j].scatter(result['seq_qpos'][:, i], result['seq_mom'][:,j], s=0.1, alpha=0.5)
-    fig.savefig('/home/gsang/Projects/Perceiver_IO/plots/coverage_forward.jpg')
+    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    fig.savefig(PLOTS_DIR / 'coverage_forward.jpg')
     plt.close()
 
 def plot_data(results):
@@ -883,8 +888,8 @@ def plot_data(results):
         return
     
     keys = ['seq_qpos', 'seq_qvel', 'seq_qacc', 'seq_mom', 'seq_mom_dot', 'seq_torque']
-    save_dir = '/home/gsang/Projects/Perceiver_IO/plots'
-    os.makedirs(save_dir, exist_ok=True)
+    save_dir = PLOTS_DIR
+    save_dir.mkdir(parents=True, exist_ok=True)
     
     colors = plt.cm.tab10.colors  # Use a colormap for dimensions
     
@@ -908,7 +913,7 @@ def plot_data(results):
         ax.set_title(f"{key}: all trajectories & all dims")
         ax.legend(loc='upper right', markerscale=5)
         fig.tight_layout()
-        fig.savefig(os.path.join(save_dir, f"{key}_trajectories.png"))
+        fig.savefig(save_dir / f"{key}_trajectories.png")
         plt.close(fig)
 
 def show_statistics(results):
@@ -1371,7 +1376,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="Generate forward-dynamics trajectory dataset")
     parser.add_argument("--save_path", type=str,
-                        default='/home/gsang/Projects/Perceiver_IO/data')
+                        default=str(DATA_DIR))
     parser.add_argument("--xml_path", type=str,
                         default='/home/gsang/miniconda3/envs/perceiver/lib/python3.10/site-packages/gymnasium/envs/mujoco/assets/reacher.xml')
     parser.add_argument("--num_steps", type=int, default=2000,

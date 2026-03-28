@@ -2,6 +2,7 @@ from torch.utils.data import Dataset
 import h5py
 import torch
 import numpy as np
+from pathlib import Path
 
 from src.qpos_representation import (
     RAW_QPOS,
@@ -270,5 +271,6 @@ class TrajectoryDPFCached(Dataset):
         }
 
 if __name__ == '__main__':
-    dataset = TrajectoryDPFCached('/home/gsang/Projects/Perceiver_IO/output/assets/generated/generated_trajectories.h5')
+    project_root = Path(__file__).resolve().parents[2]
+    dataset = TrajectoryDPFCached(str(project_root / 'data' / 'traj_80000-steps_4000.h5'))
     print(dataset[0]['seq_qpos'].shape)
