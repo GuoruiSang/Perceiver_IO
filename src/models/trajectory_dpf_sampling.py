@@ -356,6 +356,11 @@ class TrajectoryDPFSampling:
             trajectory_length: length of each trajectory
             num_diffusion_steps: number of denoising steps
             context_fraction: fraction of timesteps to use as context
+            sample_mode:
+                - "train_matched_completion": default for clean_prefix_noisy_suffix checkpoints;
+                  sample the full query with an observed clean prefix and noisy suffix
+                - "generic_full_trajectory": sample the entire trajectory from noise
+                - "observed_prefix_completion": legacy alias for train_matched_completion
             use_ema: whether to use EMA weights
             sampler: sampling method ('ddpm' or 'ddim')
             guidance_scale: CFG scale (1.0 = no CFG, >1.0 = stronger conditioning)
@@ -413,12 +418,14 @@ class TrajectoryDPFSampling:
             sample_mode
             if sample_mode is not None
             else (
-                "observed_prefix_completion"
+                "train_matched_completion"
                 if getattr(self, "query_context_mode", "random_subset") == "clean_prefix_noisy_suffix"
                 else "generic_full_trajectory"
             )
         )
-        if resolved_sample_mode not in {"generic_full_trajectory", "observed_prefix_completion"}:
+        if resolved_sample_mode == "observed_prefix_completion":
+            resolved_sample_mode = "train_matched_completion"
+        if resolved_sample_mode not in {"generic_full_trajectory", "train_matched_completion"}:
             raise ValueError(f"Unsupported sample_mode: {resolved_sample_mode}")
 
         observed_qpos = self._expand_sampling_tensor(
@@ -438,16 +445,16 @@ class TrajectoryDPFSampling:
                     f"time_indices must have shape ({trajectory_length},), got {tuple(time_indices.shape)}"
                 )
 
-        if resolved_sample_mode == "observed_prefix_completion":
+        if resolved_sample_mode == "train_matched_completion":
             if observed_qpos is None or observed_mom is None:
                 print(
-                    "[Sampling] Prefix completion requested but observed_qpos/observed_mom were not provided; "
+                    "[Sampling] Train-matched completion requested but observed_qpos/observed_mom were not provided; "
                     "falling back to generic full-trajectory sampling."
                 )
                 resolved_sample_mode = "generic_full_trajectory"
             elif self.unconditional_tau_in_state and observed_torque is None:
                 print(
-                    "[Sampling] Prefix completion in concat-state mode requires observed_torque; "
+                    "[Sampling] Train-matched completion in concat-state mode requires observed_torque; "
                     "falling back to generic full-trajectory sampling."
                 )
                 resolved_sample_mode = "generic_full_trajectory"
@@ -495,7 +502,7 @@ class TrajectoryDPFSampling:
             x = torch.randn(num_samples, trajectory_length, self.state_dim, device=device)
 
         observed_prefix_state_norm = None
-        if resolved_sample_mode == "observed_prefix_completion":
+        if resolved_sample_mode == "train_matched_completion":
             observed_state = self._build_sampling_state(
                 observed_qpos,
                 observed_mom,
@@ -530,9 +537,9 @@ class TrajectoryDPFSampling:
         
         context_idx = None
         if self.backbone != "transformer":
-            # PREFIX context: use first num_context timesteps (not random)
-            # IMPORTANT: Cap context length to training max to avoid OOD encoder behavior when extending
-            if resolved_sample_mode == "observed_prefix_completion":
+            # For train-matched completion, use a subset of the full clean-prefix/noisy-suffix query.
+            # For generic full-trajectory sampling, cap context length to the training regime.
+            if resolved_sample_mode == "train_matched_completion":
                 num_context = prefix_len
                 context_idx = self._build_sampling_context_indices(
                     trajectory_length,
@@ -541,7 +548,7 @@ class TrajectoryDPFSampling:
                     strategy="query_subset",
                 )
                 print(
-                    f"[Sampling] Prefix completion mode with observed prefix_len={prefix_len} "
+                    f"[Sampling] Train-matched completion mode with observed prefix_len={prefix_len} "
                     f"and query-subset context size={num_context}"
                 )
             else:

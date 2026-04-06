@@ -116,7 +116,7 @@ def run_completion(
             num_samples=1,
             trajectory_length=trajectory_length,
             num_diffusion_steps=num_diffusion_steps,
-            sample_mode="observed_prefix_completion",
+            sample_mode="train_matched_completion",
             prefix_len=prefix_len,
             observed_qpos=observed_qpos,
             observed_mom=observed_mom,

@@ -80,10 +80,10 @@ class WandBTrajectoryCallback(pl.Callback):
         )
         if getattr(pl_module, "query_context_mode", "random_subset") == "clean_prefix_noisy_suffix":
             prefix_len = max(1, min(horizon - 1, int(round(0.5 * horizon))))
-            metadata["mode"] = "observed_prefix_completion"
+            metadata["mode"] = "train_matched_completion"
             metadata["prefix_len"] = prefix_len
             sample_kwargs.update(
-                sample_mode="observed_prefix_completion",
+                sample_mode="train_matched_completion",
                 prefix_len=prefix_len,
                 observed_qpos=qpos,
                 observed_mom=mom,

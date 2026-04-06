@@ -926,7 +926,6 @@ def main() -> None:
                                 num_samples=int(args.num_candidates),
                                 trajectory_length=sample_horizon,
                                 num_diffusion_steps=int(args.num_diffusion_steps),
-                                sample_mode="observed_prefix_completion",
                                 prefix_len=conditioning_prefix_len,
                                 observed_qpos=observed_qpos,
                                 observed_mom=observed_mom,
