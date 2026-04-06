@@ -722,7 +722,7 @@ class TrajectoryDPFSampling:
                     # Scale step size by current diffusion noise level.
                     noise_step_scale = torch.sqrt(torch.clamp(1.0 - a_bar_t, min=1e-6)).item()
                     if guidance_method == "strategy2":
-                        x0_phys = run_one_step_guidance_hnn(
+                        x0_guided_qp = run_one_step_guidance_hnn(
                             x0_gui,
                             torque if (not self.unconditional_tau_in_state) else x0_gui[:, :, self.qpos_dim + self.mom_dim:self.qpos_dim + self.mom_dim + self.torque_dim],
                             self.qpos_dim,
@@ -736,6 +736,16 @@ class TrajectoryDPFSampling:
                             guidance_normalize_grad=guidance_normalize_grad,
                             guidance_joint_update=guidance_joint_update,
                         )
+                        if self.unconditional_tau_in_state:
+                            x0_phys = torch.cat(
+                                [
+                                    x0_guided_qp,
+                                    x0_phys[:, :, self.qpos_dim + self.mom_dim : self.qpos_dim + self.mom_dim + self.torque_dim],
+                                ],
+                                dim=-1,
+                            )
+                        else:
+                            x0_phys = x0_guided_qp
                     else:
                         raise ValueError(
                             f"Unknown guidance_method={guidance_method}. "

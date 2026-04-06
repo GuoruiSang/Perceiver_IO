@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import tempfile
@@ -23,6 +24,7 @@ import numpy as np
 import torch
 
 from scripts.data.generate_bidirectional_reacher_dataset import get_model_ids
+from src.models.HNN import HNNWrapper
 from src.models.trajectory_dpf_model import TrajectoryDPF
 from src.qpos_representation import decode_qpos_tensor, encode_qpos_array
 
@@ -92,6 +94,34 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--num_candidates", type=int, default=16)
     parser.add_argument(
+        "--hnn_checkpoint_path",
+        type=str,
+        default="",
+        help="Optional structured HNN checkpoint for physics guidance during DPF sampling.",
+    )
+    parser.add_argument(
+        "--guidance_method",
+        type=str,
+        default="strategy2",
+        choices=["strategy1", "strategy2"],
+        help="HNN guidance method passed through to TrajectoryDPF.sample_trajectories.",
+    )
+    parser.add_argument("--alpha_q", type=float, default=1e-2)
+    parser.add_argument("--alpha_p", type=float, default=1e-2)
+    parser.add_argument("--guidance_trust_lambda", type=float, default=1e-3)
+    parser.add_argument(
+        "--guidance_normalize_grad",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Normalize HNN guidance gradients before applying the update.",
+    )
+    parser.add_argument(
+        "--guidance_joint_update",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use one shared gradient norm across q and p during HNN guidance.",
+    )
+    parser.add_argument(
         "--random_future_target_min_initial_distance",
         type=float,
         default=0.1,
@@ -159,11 +189,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--max_prefix_len",
+        "--max_rollout_steps",
+        dest="max_rollout_steps",
         type=int,
         default=0,
         help=(
-            "Stop when prefix reaches this length if the goal has not been reached. "
-            "Use 0 or a negative value to roll out the full trajectory horizon."
+            "Maximum rollout steps for one evaluation task. "
+            "Use 0 or a negative value to roll out up to the dataset trajectory length. "
+            "When --reset_window_time_indices is enabled, this cap is ignored."
+        ),
+    )
+    parser.add_argument(
+        "--stall_patience_steps",
+        type=int,
+        default=500,
+        help=(
+            "When --reset_window_time_indices is enabled, stop the rollout if the best goal distance "
+            "has not improved for this many executed steps."
         ),
     )
     parser.add_argument("--device", type=str, default="cuda:0")
@@ -297,6 +339,35 @@ def effective_recent_prefix_len(prefix_len: int, recent_prefix_cap: int) -> int:
     if int(recent_prefix_cap) <= 0:
         return int(prefix_len)
     return int(min(int(prefix_len), int(recent_prefix_cap)))
+
+
+def build_observed_windows(
+    *,
+    qpos_prefix_raw: list[np.ndarray],
+    mom_prefix: list[np.ndarray],
+    torque_prefix: list[np.ndarray],
+    crop_start: int,
+    conditioning_prefix_len: int,
+    sample_horizon: int,
+    model: TrajectoryDPF,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    observed_qpos = torch.zeros((1, sample_horizon, model.qpos_dim), dtype=torch.float32, device=device)
+    observed_mom = torch.zeros((1, sample_horizon, model.mom_dim), dtype=torch.float32, device=device)
+    observed_tau = torch.zeros((1, sample_horizon, model.torque_dim), dtype=torch.float32, device=device)
+
+    qpos_window_raw = np.asarray(qpos_prefix_raw[crop_start : crop_start + conditioning_prefix_len], dtype=np.float32)
+    mom_window = np.asarray(mom_prefix[crop_start : crop_start + conditioning_prefix_len], dtype=np.float32)
+    qpos_window_model = encode_qpos_array(qpos_window_raw, model.qpos_representation).astype(np.float32, copy=False)
+
+    observed_qpos[0, :conditioning_prefix_len] = torch.from_numpy(qpos_window_model).to(device=device)
+    observed_mom[0, :conditioning_prefix_len] = torch.from_numpy(mom_window).to(device=device)
+
+    if conditioning_prefix_len > 1:
+        tau_window = np.asarray(torque_prefix[crop_start : crop_start + conditioning_prefix_len - 1], dtype=np.float32)
+        observed_tau[0, : conditioning_prefix_len - 1] = torch.from_numpy(tau_window).to(device=device)
+
+    return observed_qpos, observed_mom, observed_tau
 
 
 def setup_workspace_axis(ax: plt.Axes, goal_xy: np.ndarray, goal_tolerance: float) -> None:
@@ -684,6 +755,11 @@ def main() -> None:
     model = model.to(device)
     model.eval()
     apply_ema_once(model)
+    hnn_model = None
+    if args.hnn_checkpoint_path:
+        hnn_model = HNNWrapper.load_from_checkpoint(args.hnn_checkpoint_path, map_location=device)
+        hnn_model = hnn_model.to(device)
+        hnn_model.eval()
 
     with h5py.File(args.h5_path, "r") as h5_file:
         xml_content = h5_file.attrs["xml"]
@@ -692,8 +768,8 @@ def main() -> None:
         trajectory_length_total = int(h5_file.attrs["num_steps"])
         rollout_limit = (
             int(trajectory_length_total)
-            if int(args.max_prefix_len) <= 0
-            else max(2, min(int(args.max_prefix_len), trajectory_length_total))
+            if int(args.max_rollout_steps) <= 0
+            else max(2, min(int(args.max_rollout_steps), trajectory_length_total))
         )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -740,39 +816,50 @@ def main() -> None:
                 rollout_goal_distances = [
                     float(np.linalg.norm(fingertip_xy_from_qpos_raw(initial_qpos_raw[None, :])[0] - goal_xy))
                 ]
+                use_unbounded_reset_rollout = bool(args.reset_window_time_indices)
+                best_goal_distance_so_far = float(rollout_goal_distances[-1])
+                stall_steps_since_decrease = 0
+                stopped_due_to_stall = False
                 selection_trace: list[dict] = []
                 reached_goal = rollout_goal_distances[-1] <= float(args.goal_tolerance)
-                observed_qpos = torch.zeros(
-                    (1, task_rollout_limit, model.qpos_dim),
-                    dtype=torch.float32,
-                    device=device,
-                )
-                observed_mom = torch.zeros(
-                    (1, task_rollout_limit, model.mom_dim),
-                    dtype=torch.float32,
-                    device=device,
-                )
-                observed_tau = torch.zeros(
-                    (1, task_rollout_limit, model.torque_dim),
-                    dtype=torch.float32,
-                    device=device,
-                )
-                observed_qpos[0, 0] = torch.from_numpy(initial_qpos_model).to(device=device)
-                observed_mom[0, 0] = torch.from_numpy(initial_mom_f32).to(device=device)
-
-                while len(qpos_prefix_raw) < task_rollout_limit and not reached_goal:
+                while not reached_goal:
+                    if (not use_unbounded_reset_rollout) and len(qpos_prefix_raw) >= task_rollout_limit:
+                        break
+                    if use_unbounded_reset_rollout and stall_steps_since_decrease >= int(args.stall_patience_steps):
+                        stopped_due_to_stall = True
+                        break
                     prefix_len = len(qpos_prefix_raw)
-                    sample_horizon_abs = effective_sampling_horizon(
-                        prefix_len=prefix_len,
-                        rollout_limit=task_rollout_limit,
-                        lookahead_steps=int(args.lookahead_steps),
-                    )
                     conditioning_prefix_len = effective_recent_prefix_len(
                         prefix_len=prefix_len,
                         recent_prefix_cap=int(args.recent_prefix_cap),
                     )
                     crop_start = prefix_len - conditioning_prefix_len
-                    sample_horizon = sample_horizon_abs - crop_start
+                    if use_unbounded_reset_rollout:
+                        future_steps = (
+                            int(args.lookahead_steps)
+                            if int(args.lookahead_steps) > 0
+                            else int(trajectory_length_total)
+                        )
+                        sample_horizon_abs = prefix_len + future_steps
+                        sample_horizon = conditioning_prefix_len + future_steps
+                    else:
+                        sample_horizon_abs = effective_sampling_horizon(
+                            prefix_len=prefix_len,
+                            rollout_limit=task_rollout_limit,
+                            lookahead_steps=int(args.lookahead_steps),
+                        )
+                        sample_horizon = sample_horizon_abs - crop_start
+
+                    observed_qpos, observed_mom, observed_tau = build_observed_windows(
+                        qpos_prefix_raw=qpos_prefix_raw,
+                        mom_prefix=mom_prefix,
+                        torque_prefix=torque_prefix,
+                        crop_start=crop_start,
+                        conditioning_prefix_len=conditioning_prefix_len,
+                        sample_horizon=sample_horizon,
+                        model=model,
+                        device=device,
+                    )
                     if bool(args.reset_window_time_indices):
                         time_indices = torch.arange(
                             0,
@@ -808,19 +895,27 @@ def main() -> None:
                         torch.manual_seed(local_seed)
                         np.random.seed(local_seed)
 
-                        with torch.no_grad():
+                        sample_context = contextlib.nullcontext() if hnn_model is not None else torch.no_grad()
+                        with sample_context:
                             generated_state, generated_tau = model.sample_trajectories(
                                 num_samples=int(args.num_candidates),
                                 trajectory_length=sample_horizon,
                                 num_diffusion_steps=int(args.num_diffusion_steps),
                                 sample_mode="observed_prefix_completion",
                                 prefix_len=conditioning_prefix_len,
-                                observed_qpos=observed_qpos[:, crop_start:sample_horizon_abs, :],
-                                observed_mom=observed_mom[:, crop_start:sample_horizon_abs, :],
-                                observed_torque=observed_tau[:, crop_start:sample_horizon_abs, :],
+                                observed_qpos=observed_qpos,
+                                observed_mom=observed_mom,
+                                observed_torque=observed_tau,
                                 time_indices=time_indices,
                                 use_ema=False,
                                 sampler="ddim",
+                                hnn=hnn_model,
+                                guidance_method=str(args.guidance_method),
+                                alpha_q=float(args.alpha_q),
+                                alpha_p=float(args.alpha_p),
+                                guidance_trust_lambda=float(args.guidance_trust_lambda),
+                                guidance_normalize_grad=bool(args.guidance_normalize_grad),
+                                guidance_joint_update=bool(args.guidance_joint_update),
                             )
 
                         candidate_qpos_model = generated_state[:, conditioning_prefix_len:, : model.qpos_dim]
@@ -873,13 +968,12 @@ def main() -> None:
                     torque_prefix.append(applied_tau)
                     rollout_goal_distances.append(next_goal_distance)
                     reached_goal = next_goal_distance <= float(args.goal_tolerance)
-                    observed_qpos[0, prefix_len] = torch.from_numpy(
-                        encode_qpos_array(next_qpos_raw[None, :].astype(np.float32), model.qpos_representation)[0]
-                    ).to(device=device)
-                    observed_mom[0, prefix_len] = torch.from_numpy(next_mom.astype(np.float32, copy=False)).to(device=device)
-                    observed_tau[0, prefix_len - 1] = torch.from_numpy(applied_tau.astype(np.float32, copy=False)).to(
-                        device=device
-                    )
+                    if next_goal_distance + 1e-12 < best_goal_distance_so_far:
+                        best_goal_distance_so_far = next_goal_distance
+                    if next_goal_distance + 1e-12 < current_goal_distance:
+                        stall_steps_since_decrease = 0
+                    else:
+                        stall_steps_since_decrease += 1
 
                     selection_trace.append(
                         {
@@ -901,6 +995,8 @@ def main() -> None:
                             "chosen_candidate_best_goal_dist": best_candidate_goal_distance,
                             "applied_tau": applied_tau.tolist(),
                             "result_goal_distance": next_goal_distance,
+                            "best_goal_distance_so_far": float(best_goal_distance_so_far),
+                            "stall_steps_since_decrease": int(stall_steps_since_decrease),
                         }
                     )
 
@@ -982,13 +1078,21 @@ def main() -> None:
                     "traj_index": int(task["metadata"]["traj_index"]) if "traj_index" in task["metadata"] else None,
                     "goal_xy": goal_xy.tolist(),
                     "goal_tolerance": float(args.goal_tolerance),
+                    "hnn_checkpoint_path": str(args.hnn_checkpoint_path) if hnn_model is not None else None,
+                    "guidance_method": str(args.guidance_method) if hnn_model is not None else None,
+                    "alpha_q": float(args.alpha_q) if hnn_model is not None else None,
+                    "alpha_p": float(args.alpha_p) if hnn_model is not None else None,
+                    "guidance_trust_lambda": float(args.guidance_trust_lambda) if hnn_model is not None else None,
+                    "guidance_normalize_grad": bool(args.guidance_normalize_grad) if hnn_model is not None else None,
+                    "guidance_joint_update": bool(args.guidance_joint_update) if hnn_model is not None else None,
                     "num_candidates": int(args.num_candidates),
                     "num_diffusion_steps": int(args.num_diffusion_steps),
                     "lookahead_steps": int(args.lookahead_steps),
                     "recent_prefix_cap": int(args.recent_prefix_cap),
-                    "max_prefix_len": int(task_rollout_limit),
+                    "max_rollout_steps": None if use_unbounded_reset_rollout else int(task_rollout_limit),
                     "steps_taken": int(len(rollout_qpos_raw)),
                     "reached_goal": bool(reached_goal),
+                    "stopped_due_to_stall": bool(stopped_due_to_stall),
                     "best_goal_distance": float(rollout_goal_dist.min()),
                     "final_goal_distance": float(rollout_goal_dist[-1]),
                     "replay_best_goal_distance": None if replay_goal_dist is None else float(replay_goal_dist.min()),
@@ -1038,7 +1142,15 @@ def main() -> None:
         "recent_prefix_cap": int(args.recent_prefix_cap),
         "reset_window_time_indices": bool(args.reset_window_time_indices),
         "goal_tolerance": float(args.goal_tolerance),
-        "max_prefix_len": int(args.max_prefix_len),
+        "hnn_checkpoint_path": str(args.hnn_checkpoint_path) if hnn_model is not None else None,
+        "guidance_method": str(args.guidance_method) if hnn_model is not None else None,
+        "alpha_q": float(args.alpha_q) if hnn_model is not None else None,
+        "alpha_p": float(args.alpha_p) if hnn_model is not None else None,
+        "guidance_trust_lambda": float(args.guidance_trust_lambda) if hnn_model is not None else None,
+        "guidance_normalize_grad": bool(args.guidance_normalize_grad) if hnn_model is not None else None,
+        "guidance_joint_update": bool(args.guidance_joint_update) if hnn_model is not None else None,
+        "max_rollout_steps": int(args.max_rollout_steps),
+        "stall_patience_steps": int(args.stall_patience_steps),
         "random_future_target_min_initial_distance": float(args.random_future_target_min_initial_distance),
         "aggregate": {
             "success_rate": float(np.mean([float(row["reached_goal"]) for row in summary_rows])),
