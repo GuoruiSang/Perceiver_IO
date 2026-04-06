@@ -122,6 +122,30 @@ def parse_args() -> argparse.Namespace:
         help="Use one shared gradient norm across q and p during HNN guidance.",
     )
     parser.add_argument(
+        "--target_guidance_alpha",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional target-space diffusion guidance step size in end-effector space. "
+            "When > 0, guidance updates q only toward the goal during sampling."
+        ),
+    )
+    parser.add_argument(
+        "--target_guidance_time_power",
+        type=float,
+        default=2.0,
+        help=(
+            "Exponent for late-timestep weighting in target guidance. "
+            "Larger values emphasize later suffix timesteps more strongly."
+        ),
+    )
+    parser.add_argument(
+        "--target_guidance_normalize_grad",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Normalize target-guidance q gradients before the update step.",
+    )
+    parser.add_argument(
         "--random_future_target_min_initial_distance",
         type=float,
         default=0.1,
@@ -895,7 +919,8 @@ def main() -> None:
                         torch.manual_seed(local_seed)
                         np.random.seed(local_seed)
 
-                        sample_context = contextlib.nullcontext() if hnn_model is not None else torch.no_grad()
+                        need_grad_guidance = (hnn_model is not None) or (float(args.target_guidance_alpha) > 0.0)
+                        sample_context = contextlib.nullcontext() if need_grad_guidance else torch.no_grad()
                         with sample_context:
                             generated_state, generated_tau = model.sample_trajectories(
                                 num_samples=int(args.num_candidates),
@@ -916,6 +941,10 @@ def main() -> None:
                                 guidance_trust_lambda=float(args.guidance_trust_lambda),
                                 guidance_normalize_grad=bool(args.guidance_normalize_grad),
                                 guidance_joint_update=bool(args.guidance_joint_update),
+                                target_xy=goal_xy_t.view(1, 2),
+                                target_guidance_alpha=float(args.target_guidance_alpha),
+                                target_guidance_time_power=float(args.target_guidance_time_power),
+                                target_guidance_normalize_grad=bool(args.target_guidance_normalize_grad),
                             )
 
                         candidate_qpos_model = generated_state[:, conditioning_prefix_len:, : model.qpos_dim]
@@ -1085,6 +1114,9 @@ def main() -> None:
                     "guidance_trust_lambda": float(args.guidance_trust_lambda) if hnn_model is not None else None,
                     "guidance_normalize_grad": bool(args.guidance_normalize_grad) if hnn_model is not None else None,
                     "guidance_joint_update": bool(args.guidance_joint_update) if hnn_model is not None else None,
+                    "target_guidance_alpha": float(args.target_guidance_alpha),
+                    "target_guidance_time_power": float(args.target_guidance_time_power),
+                    "target_guidance_normalize_grad": bool(args.target_guidance_normalize_grad),
                     "num_candidates": int(args.num_candidates),
                     "num_diffusion_steps": int(args.num_diffusion_steps),
                     "lookahead_steps": int(args.lookahead_steps),
@@ -1149,6 +1181,9 @@ def main() -> None:
         "guidance_trust_lambda": float(args.guidance_trust_lambda) if hnn_model is not None else None,
         "guidance_normalize_grad": bool(args.guidance_normalize_grad) if hnn_model is not None else None,
         "guidance_joint_update": bool(args.guidance_joint_update) if hnn_model is not None else None,
+        "target_guidance_alpha": float(args.target_guidance_alpha),
+        "target_guidance_time_power": float(args.target_guidance_time_power),
+        "target_guidance_normalize_grad": bool(args.target_guidance_normalize_grad),
         "max_rollout_steps": int(args.max_rollout_steps),
         "stall_patience_steps": int(args.stall_patience_steps),
         "random_future_target_min_initial_distance": float(args.random_future_target_min_initial_distance),

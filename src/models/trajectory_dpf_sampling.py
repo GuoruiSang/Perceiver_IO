@@ -11,9 +11,92 @@ from scripts.data.generate_dataset_forward import (
     generate_torque_sequence,
     parse_torque_policies,
 )
+from src.qpos_representation import decode_qpos_tensor
 
 
 class TrajectoryDPFSampling:
+    def _expand_target_xy(
+        self,
+        target_xy: Optional[torch.Tensor],
+        num_samples: int,
+    ) -> Optional[torch.Tensor]:
+        if target_xy is None:
+            return None
+        if target_xy.ndim == 1:
+            target_xy = target_xy.unsqueeze(0)
+        if target_xy.ndim != 2 or target_xy.shape[-1] != 2:
+            raise ValueError(f"target_xy must have shape [B,2] or [2], got {tuple(target_xy.shape)}")
+        if target_xy.shape[0] == 1 and num_samples > 1:
+            target_xy = target_xy.expand(num_samples, -1)
+        elif target_xy.shape[0] != num_samples:
+            raise ValueError(
+                f"target_xy batch dim must be 1 or num_samples={num_samples}, got {target_xy.shape[0]}"
+            )
+        return target_xy.to(device=self.device, dtype=torch.float32)
+
+    def _reacher_fingertip_xy_from_qpos_raw(self, qpos_raw: torch.Tensor) -> torch.Tensor:
+        q0 = qpos_raw[..., 0]
+        q1 = qpos_raw[..., 1]
+        return torch.stack(
+            [
+                0.10 * torch.cos(q0) + 0.11 * torch.cos(q0 + q1),
+                0.10 * torch.sin(q0) + 0.11 * torch.sin(q0 + q1),
+            ],
+            dim=-1,
+        )
+
+    def _run_one_step_target_guidance(
+        self,
+        state_phys: torch.Tensor,
+        target_xy: torch.Tensor,
+        prefix_len: int,
+        alpha_q: float,
+        time_power: float,
+        normalize_grad: bool,
+    ) -> torch.Tensor:
+        if alpha_q <= 0:
+            return state_phys
+
+        state_var = state_phys.detach().requires_grad_(True)
+        qpos_encoded = state_var[:, :, : self.qpos_dim]
+        qpos_raw = decode_qpos_tensor(qpos_encoded, self.qpos_representation)
+        if qpos_raw.shape[-1] != 2:
+            raise ValueError(
+                "Target guidance currently supports only 2-DOF reacher qpos trajectories."
+            )
+
+        suffix_start = max(0, min(int(prefix_len), int(qpos_raw.shape[1] - 1)))
+        suffix_qpos_raw = qpos_raw[:, suffix_start:, :]
+        if suffix_qpos_raw.shape[1] <= 0:
+            return state_phys
+
+        ee_xy = self._reacher_fingertip_xy_from_qpos_raw(suffix_qpos_raw)
+        goal_xy = target_xy[:, None, :]
+        sq_error = torch.sum((ee_xy - goal_xy) ** 2, dim=-1)
+
+        suffix_len = sq_error.shape[1]
+        weights = torch.linspace(
+            1.0 / max(suffix_len, 1),
+            1.0,
+            suffix_len,
+            device=state_var.device,
+            dtype=state_var.dtype,
+        )
+        if time_power != 1.0:
+            weights = weights.pow(float(time_power))
+        weights = weights / torch.clamp(weights.sum(), min=1e-8)
+        loss = (sq_error * weights.view(1, -1)).sum(dim=1).mean()
+
+        grad_q = torch.autograd.grad(loss, qpos_encoded, retain_graph=False, create_graph=False)[0]
+        if normalize_grad:
+            grad_norm = torch.sqrt(torch.mean(grad_q.detach() ** 2, dim=(1, 2), keepdim=True) + 1e-8)
+            grad_q = grad_q / grad_norm
+
+        qpos_guided = qpos_encoded - float(alpha_q) * grad_q
+        state_guided = state_phys.clone()
+        state_guided[:, :, : self.qpos_dim] = qpos_guided.detach()
+        return state_guided
+
     def _expand_sampling_tensor(
         self,
         tensor: Optional[torch.Tensor],
@@ -257,6 +340,10 @@ class TrajectoryDPFSampling:
         guidance_normalize_grad: bool = True,  # Strategy 2: normalize guidance gradients
         guidance_joint_update: bool = False,  # Strategy 2: share one norm across q/p
         guidance_num_candidates: int = 16,  # Strategy 1 particle count
+        target_xy: torch.Tensor = None,
+        target_guidance_alpha: float = 0.0,
+        target_guidance_time_power: float = 2.0,
+        target_guidance_normalize_grad: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample trajectories using diffusion with classifier-free guidance.
@@ -280,6 +367,10 @@ class TrajectoryDPFSampling:
             guidance_normalize_grad: strategy2 only; normalize per-sample guidance gradients before step
             guidance_joint_update: strategy2 only; use one shared norm across q/p instead of separate norms
             guidance_num_candidates: particle count for strategy1
+            target_xy: optional target end-effector position for target-space guidance [num_samples, 2]
+            target_guidance_alpha: one-step target guidance step size applied to q only
+            target_guidance_time_power: larger values emphasize later suffix timesteps more strongly
+            target_guidance_normalize_grad: normalize target-guidance q gradients before the step
             dt: timestep used to parameterize random torque generation (seconds between torque samples).
                 If None, defaults to self.data_dt (dataset control timestep).
             torque: optional pre-generated torque [num_samples, trajectory_length, torque_dim]
@@ -339,6 +430,7 @@ class TrajectoryDPFSampling:
         observed_torque = self._expand_sampling_tensor(
             observed_torque, num_samples, trajectory_length, self.torque_dim, "observed_torque"
         )
+        target_xy = self._expand_target_xy(target_xy, num_samples)
         if time_indices is not None:
             time_indices = time_indices.to(device=device, dtype=torch.long)
             if time_indices.ndim != 1 or time_indices.shape[0] != trajectory_length:
@@ -757,6 +849,18 @@ class TrajectoryDPFSampling:
                         x0_np = x0_phys.detach().cpu().numpy()
                         x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)
                         x0_phys = torch.tensor(x0_smoothed, dtype=x0_phys.dtype, device=x0_phys.device)
+                    x0 = self.normalize_state(x0_phys).detach()
+
+                if target_xy is not None and target_guidance_alpha > 0:
+                    x0_phys = self.denormalize_state(x0)
+                    x0_phys = self._run_one_step_target_guidance(
+                        x0_phys,
+                        target_xy=target_xy,
+                        prefix_len=int(prefix_len or 0),
+                        alpha_q=float(target_guidance_alpha),
+                        time_power=float(target_guidance_time_power),
+                        normalize_grad=bool(target_guidance_normalize_grad),
+                    )
                     x0 = self.normalize_state(x0_phys).detach()
 
                 eps_coef = torch.sqrt(1.0 - a_bar_prev)
