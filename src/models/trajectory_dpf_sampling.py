@@ -344,6 +344,7 @@ class TrajectoryDPFSampling:
         target_guidance_alpha: float = 0.0,
         target_guidance_time_power: float = 2.0,
         target_guidance_normalize_grad: bool = True,
+        guidance_order: str = "hnn_then_target",
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample trajectories using diffusion with classifier-free guidance.
@@ -376,6 +377,8 @@ class TrajectoryDPFSampling:
             target_guidance_alpha: one-step target guidance step size applied to q only
             target_guidance_time_power: larger values emphasize later suffix timesteps more strongly
             target_guidance_normalize_grad: normalize target-guidance q gradients before the step
+            guidance_order: ordering of target vs HNN guidance when both are enabled.
+                Supported values: "hnn_then_target", "target_then_hnn"
             dt: timestep used to parameterize random torque generation (seconds between torque samples).
                 If None, defaults to self.data_dt (dataset control timestep).
             torque: optional pre-generated torque [num_samples, trajectory_length, torque_dim]
@@ -413,6 +416,11 @@ class TrajectoryDPFSampling:
             print(f"[Sampling] Using regular model weights (use_ema=False)")
         
         device = self.device
+        if guidance_order not in {"hnn_then_target", "target_then_hnn"}:
+            raise ValueError(
+                f"Unsupported guidance_order={guidance_order!r}. "
+                "Valid values: {'hnn_then_target', 'target_then_hnn'}"
+            )
 
         resolved_sample_mode = (
             sample_mode
@@ -820,10 +828,16 @@ class TrajectoryDPFSampling:
 
                     # Scale step size by current diffusion noise level.
                     noise_step_scale = torch.sqrt(torch.clamp(1.0 - a_bar_t, min=1e-6)).item()
-                    if guidance_method == "strategy2":
-                        x0_guided_qp = run_one_step_guidance_hnn(
-                            x0_gui,
-                            torque if (not self.unconditional_tau_in_state) else x0_gui[:, :, self.qpos_dim + self.mom_dim:self.qpos_dim + self.mom_dim + self.torque_dim],
+
+                    def apply_hnn_guidance(current_x0_phys: torch.Tensor) -> torch.Tensor:
+                        if guidance_method != "strategy2":
+                            raise ValueError(
+                                f"Unknown guidance_method={guidance_method}. "
+                                "Valid: {'strategy1', 'strategy2'}"
+                            )
+                        guided_qp = run_one_step_guidance_hnn(
+                            current_x0_phys,
+                            torque if (not self.unconditional_tau_in_state) else current_x0_phys[:, :, self.qpos_dim + self.mom_dim:self.qpos_dim + self.mom_dim + self.torque_dim],
                             self.qpos_dim,
                             self.mom_dim,
                             self.data_dt,
@@ -836,20 +850,37 @@ class TrajectoryDPFSampling:
                             guidance_joint_update=guidance_joint_update,
                         )
                         if self.unconditional_tau_in_state:
-                            x0_phys = torch.cat(
+                            return torch.cat(
                                 [
-                                    x0_guided_qp,
-                                    x0_phys[:, :, self.qpos_dim + self.mom_dim : self.qpos_dim + self.mom_dim + self.torque_dim],
+                                    guided_qp,
+                                    current_x0_phys[
+                                        :,
+                                        :,
+                                        self.qpos_dim + self.mom_dim : self.qpos_dim + self.mom_dim + self.torque_dim,
+                                    ],
                                 ],
                                 dim=-1,
                             )
-                        else:
-                            x0_phys = x0_guided_qp
-                    else:
-                        raise ValueError(
-                            f"Unknown guidance_method={guidance_method}. "
-                            "Valid: {'strategy1', 'strategy2'}"
+                        return guided_qp
+
+                    def apply_target_guidance(current_x0_phys: torch.Tensor) -> torch.Tensor:
+                        if target_xy is None or target_guidance_alpha <= 0:
+                            return current_x0_phys
+                        return self._run_one_step_target_guidance(
+                            current_x0_phys,
+                            target_xy=target_xy,
+                            prefix_len=int(prefix_len or 0),
+                            alpha_q=float(target_guidance_alpha),
+                            time_power=float(target_guidance_time_power),
+                            normalize_grad=bool(target_guidance_normalize_grad),
                         )
+
+                    if guidance_order == "target_then_hnn":
+                        x0_phys = apply_target_guidance(x0_phys)
+                        x0_phys = apply_hnn_guidance(x0_phys)
+                    else:
+                        x0_phys = apply_hnn_guidance(x0_phys)
+                        x0_phys = apply_target_guidance(x0_phys)
                     # Smooth after guidance (per-step mode only)
                     if do_output_smooth:
                         from scipy.ndimage import gaussian_filter1d
@@ -857,8 +888,7 @@ class TrajectoryDPFSampling:
                         x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)
                         x0_phys = torch.tensor(x0_smoothed, dtype=x0_phys.dtype, device=x0_phys.device)
                     x0 = self.normalize_state(x0_phys).detach()
-
-                if target_xy is not None and target_guidance_alpha > 0:
+                elif target_xy is not None and target_guidance_alpha > 0:
                     x0_phys = self.denormalize_state(x0)
                     x0_phys = self._run_one_step_target_guidance(
                         x0_phys,

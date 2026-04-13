@@ -146,6 +146,13 @@ def parse_args() -> argparse.Namespace:
         help="Normalize target-guidance q gradients before the update step.",
     )
     parser.add_argument(
+        "--guidance_order",
+        type=str,
+        default="hnn_then_target",
+        choices=["hnn_then_target", "target_then_hnn"],
+        help="Order of applying HNN guidance and target guidance when both are enabled.",
+    )
+    parser.add_argument(
         "--random_future_target_min_initial_distance",
         type=float,
         default=0.1,
@@ -940,6 +947,7 @@ def main() -> None:
                                 guidance_trust_lambda=float(args.guidance_trust_lambda),
                                 guidance_normalize_grad=bool(args.guidance_normalize_grad),
                                 guidance_joint_update=bool(args.guidance_joint_update),
+                                guidance_order=str(args.guidance_order),
                                 target_xy=goal_xy_t.view(1, 2),
                                 target_guidance_alpha=float(args.target_guidance_alpha),
                                 target_guidance_time_power=float(args.target_guidance_time_power),
@@ -1113,6 +1121,7 @@ def main() -> None:
                     "guidance_trust_lambda": float(args.guidance_trust_lambda) if hnn_model is not None else None,
                     "guidance_normalize_grad": bool(args.guidance_normalize_grad) if hnn_model is not None else None,
                     "guidance_joint_update": bool(args.guidance_joint_update) if hnn_model is not None else None,
+                    "guidance_order": str(args.guidance_order),
                     "target_guidance_alpha": float(args.target_guidance_alpha),
                     "target_guidance_time_power": float(args.target_guidance_time_power),
                     "target_guidance_normalize_grad": bool(args.target_guidance_normalize_grad),
@@ -1180,6 +1189,7 @@ def main() -> None:
         "guidance_trust_lambda": float(args.guidance_trust_lambda) if hnn_model is not None else None,
         "guidance_normalize_grad": bool(args.guidance_normalize_grad) if hnn_model is not None else None,
         "guidance_joint_update": bool(args.guidance_joint_update) if hnn_model is not None else None,
+        "guidance_order": str(args.guidance_order),
         "target_guidance_alpha": float(args.target_guidance_alpha),
         "target_guidance_time_power": float(args.target_guidance_time_power),
         "target_guidance_normalize_grad": bool(args.target_guidance_normalize_grad),
