@@ -145,7 +145,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--candidate_scoring",
         type=str,
         default="predicted_suffix",
-        choices=["predicted_suffix", "mujoco_rollout", "hnn_iid_random_shooting"],
+        choices=[
+            "predicted_suffix",
+            "mujoco_rollout",
+            "hnn_iid_random_shooting",
+            "mujoco_iid_random_shooting",
+        ],
         help="Candidate ranking mode forwarded to run_reacher_goal_prefix_expansion.py.",
     )
     parser.add_argument(
@@ -153,6 +158,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.2,
         help="Forwarded for HNN iid random shooting; ignored by DPF rollout runners.",
+    )
+    parser.add_argument(
+        "--num_cpu_workers",
+        type=int,
+        default=8,
+        help="Forwarded to CPU-based random-shooting runners.",
     )
     parser.add_argument("--num_diffusion_steps", type=int, default=20)
     parser.add_argument("--lookahead_steps", type=int, default=256)
@@ -198,6 +209,8 @@ def base_command(args: argparse.Namespace, *, output_dir: Path, task_ids: list[i
         str(args.candidate_scoring),
         "--torque_scale",
         str(float(args.torque_scale)),
+        "--num_cpu_workers",
+        str(int(args.num_cpu_workers)),
         "--num_diffusion_steps",
         str(int(args.num_diffusion_steps)),
         "--lookahead_steps",
@@ -415,6 +428,8 @@ def write_candidate_progress(
         method_label = "DPF with MuJoCo oracle candidate selection"
     elif method_label == "hnn_iid_random_shooting":
         method_label = "HNN iid random shooting"
+    elif method_label == "mujoco_iid_random_shooting":
+        method_label = "MuJoCo iid random shooting"
 
     lines = [
         f"# {method_label}: n={candidate_count}",
@@ -425,6 +440,7 @@ def write_candidate_progress(
         f"- candidate_scoring = `{args.candidate_scoring}`",
         f"- lookahead_steps = `{args.lookahead_steps}`",
         f"- recent_prefix_cap = `{args.recent_prefix_cap}`",
+        f"- num_cpu_workers = `{args.num_cpu_workers}`",
         f"- max_sampling_retries = `{args.max_sampling_retries}`",
         f"- status = `{'complete' if payload['is_complete'] else 'running'}`",
         f"- completed_tasks = `{payload['num_completed_tasks']}/{payload['num_total_tasks']}`",
@@ -517,6 +533,8 @@ def write_root_progress(
         method_label = "DPF MuJoCo-Oracle Candidate Sweep"
     elif method_label == "hnn_iid_random_shooting":
         method_label = "HNN IID Random-Shooting Candidate Sweep"
+    elif method_label == "mujoco_iid_random_shooting":
+        method_label = "MuJoCo IID Random-Shooting Candidate Sweep"
 
     lines = [
         f"# {method_label} Progress",
@@ -529,6 +547,7 @@ def write_root_progress(
         f"- num_diffusion_steps = `{args.num_diffusion_steps}`",
         f"- lookahead_steps = `{args.lookahead_steps}`",
         f"- recent_prefix_cap = `{args.recent_prefix_cap}`",
+        f"- num_cpu_workers = `{args.num_cpu_workers}`",
         f"- stall_patience_steps = `{args.stall_patience_steps}`",
         f"- max_sampling_retries = `{args.max_sampling_retries}`",
         f"- retry_improvement_margin = `{args.retry_improvement_margin}`",
@@ -647,6 +666,7 @@ def main() -> None:
         "workers_per_gpu": int(args.workers_per_gpu),
         "candidate_scoring": str(args.candidate_scoring),
         "torque_scale": float(args.torque_scale),
+        "num_cpu_workers": int(args.num_cpu_workers),
         "num_diffusion_steps": int(args.num_diffusion_steps),
         "lookahead_steps": int(args.lookahead_steps),
         "recent_prefix_cap": int(args.recent_prefix_cap),
