@@ -94,6 +94,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--num_candidates", type=int, default=16)
     parser.add_argument(
+        "--candidate_scoring",
+        type=str,
+        default="predicted_suffix",
+        choices=["predicted_suffix", "mujoco_rollout"],
+        help=(
+            "How to rank sampled candidates. predicted_suffix uses the model-decoded q "
+            "suffix, while mujoco_rollout simulates each candidate torque suffix from the "
+            "current true state and ranks by actual MuJoCo end-effector distance."
+        ),
+    )
+    parser.add_argument(
+        "--torque_scale",
+        type=float,
+        default=0.2,
+        help="Compatibility argument for shared sweep launchers; DPF rollout does not use it.",
+    )
+    parser.add_argument(
         "--hnn_checkpoint_path",
         type=str,
         default="",
@@ -144,6 +161,22 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Normalize target-guidance q gradients before the update step.",
+    )
+    parser.add_argument(
+        "--target_guidance_norm",
+        type=str,
+        default="l2",
+        choices=["l2", "l1", "linf"],
+        help="End-effector norm used for target-guidance loss over the generated suffix.",
+    )
+    parser.add_argument(
+        "--target_guidance_use_time_weights",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Apply late-timestep weighting over the generated suffix for target guidance. "
+            "Disable to average the suffix loss uniformly."
+        ),
     )
     parser.add_argument(
         "--guidance_order",
@@ -245,6 +278,16 @@ def parse_args() -> argparse.Namespace:
         "--summary_name",
         type=str,
         default="reacher_goal_prefix_expansion_summary.json",
+    )
+    parser.add_argument(
+        "--progress_summary_name",
+        type=str,
+        default="reacher_goal_prefix_expansion_progress.json",
+        help=(
+            "Compact progress summary that is refreshed after each finished task. "
+            "This keeps intermediate monitoring lightweight while the full summary is "
+            "still written at the end."
+        ),
     )
     return parser.parse_args()
 
@@ -348,6 +391,41 @@ class ReacherRolloutStepper:
         next_qpos_raw = data.qpos[:qpos_dim].copy()
         next_mom = (self.mass @ data.qvel)[:qvel_dim].copy()
         return next_qpos_raw, next_mom
+
+    def score_torque_suffix(
+        self,
+        *,
+        qpos_raw: np.ndarray,
+        mom: np.ndarray,
+        torque_suffix: np.ndarray,
+        goal_xy: np.ndarray,
+    ) -> tuple[float, float]:
+        data = mujoco.MjData(self.model)
+        mass = np.zeros((self.model.nv, self.model.nv), dtype=np.float64)
+        qpos_dim = int(qpos_raw.shape[-1])
+        qvel_dim = int(mom.shape[-1])
+        data.qpos[:] = 0.0
+        data.qvel[:] = 0.0
+        data.ctrl[:] = 0.0
+        data.qpos[:qpos_dim] = qpos_raw
+        mujoco.mj_forward(self.model, data)
+        mujoco.mj_fullM(self.model, mass, data.qM)
+        data.qvel[:qvel_dim] = np.linalg.solve(mass[:qvel_dim, :qvel_dim], mom).astype(
+            np.float64,
+            copy=False,
+        )
+        mujoco.mj_forward(self.model, data)
+
+        min_goal_distance = float("inf")
+        final_goal_distance = float("inf")
+        for torque in np.asarray(torque_suffix, dtype=np.float64):
+            for _ in range(self.skip_steps):
+                data.ctrl[:] = torque
+                mujoco.mj_step(self.model, data)
+            ee_xy = fingertip_xy_from_qpos_raw(data.qpos[:qpos_dim][None, :])[0]
+            final_goal_distance = float(np.linalg.norm(ee_xy - goal_xy))
+            min_goal_distance = min(min_goal_distance, final_goal_distance)
+        return min_goal_distance, final_goal_distance
 
 
 def apply_ema_once(model: TrajectoryDPF) -> None:
@@ -604,6 +682,75 @@ def aggregate_metric(rows: list[dict], key: str) -> dict[str, float]:
     }
 
 
+def compact_summary_row(row: dict) -> dict:
+    return {
+        key: value
+        for key, value in row.items()
+        if key not in {"rollout_qpos_raw", "rollout_mom", "rollout_tau", "selection_trace"}
+    }
+
+
+def build_summary_payload(
+    *,
+    args: argparse.Namespace,
+    device: torch.device,
+    task_ids: list[int],
+    rows: list[dict],
+    hnn_model: HNNWrapper | None,
+    is_complete: bool,
+    compact_rows_only: bool,
+) -> dict:
+    payload_rows = [compact_summary_row(row) if compact_rows_only else row for row in rows]
+    return {
+        "checkpoint_path": args.checkpoint_path,
+        "h5_path": args.h5_path,
+        "device": str(device),
+        "seed": int(args.seed),
+        "task_mode": str(args.task_mode),
+        "task_ids": task_ids,
+        "num_total_tasks": int(len(task_ids)),
+        "num_completed_tasks": int(len(rows)),
+        "completed_task_ids": [int(row["task_id"]) for row in rows],
+        "is_complete": bool(is_complete),
+        "num_candidates": int(args.num_candidates),
+        "candidate_scoring": str(args.candidate_scoring),
+        "max_sampling_retries": int(args.max_sampling_retries),
+        "retry_improvement_margin": float(args.retry_improvement_margin),
+        "num_diffusion_steps": int(args.num_diffusion_steps),
+        "lookahead_steps": int(args.lookahead_steps),
+        "recent_prefix_cap": int(args.recent_prefix_cap),
+        "reset_window_time_indices": bool(args.reset_window_time_indices),
+        "goal_tolerance": float(args.goal_tolerance),
+        "hnn_checkpoint_path": str(args.hnn_checkpoint_path) if hnn_model is not None else None,
+        "guidance_method": str(args.guidance_method) if hnn_model is not None else None,
+        "alpha_q": float(args.alpha_q) if hnn_model is not None else None,
+        "alpha_p": float(args.alpha_p) if hnn_model is not None else None,
+        "guidance_trust_lambda": float(args.guidance_trust_lambda) if hnn_model is not None else None,
+        "guidance_normalize_grad": bool(args.guidance_normalize_grad) if hnn_model is not None else None,
+        "guidance_joint_update": bool(args.guidance_joint_update) if hnn_model is not None else None,
+        "guidance_order": str(args.guidance_order),
+        "target_guidance_alpha": float(args.target_guidance_alpha),
+        "target_guidance_time_power": float(args.target_guidance_time_power),
+        "target_guidance_normalize_grad": bool(args.target_guidance_normalize_grad),
+        "target_guidance_norm": str(args.target_guidance_norm),
+        "target_guidance_use_time_weights": bool(args.target_guidance_use_time_weights),
+        "max_rollout_steps": int(args.max_rollout_steps),
+        "stall_patience_steps": int(args.stall_patience_steps),
+        "random_future_target_min_initial_distance": float(args.random_future_target_min_initial_distance),
+        "aggregate": {
+            "success_rate": (
+                float(np.mean([float(row["reached_goal"]) for row in rows])) if rows else 0.0
+            ),
+            "best_goal_distance": aggregate_metric(rows, "best_goal_distance"),
+            "final_goal_distance": aggregate_metric(rows, "final_goal_distance"),
+            "qpos_mse_to_replay": aggregate_metric(rows, "qpos_mse_to_replay"),
+            "mom_mse_to_replay": aggregate_metric(rows, "mom_mse_to_replay"),
+            "ee_xy_mse_to_replay": aggregate_metric(rows, "ee_xy_mse_to_replay"),
+        },
+        "rows": payload_rows,
+    }
+
+
 def build_validation_random_source_random_future_target_task(
     *,
     h5_file: h5py.File,
@@ -771,6 +918,8 @@ def main() -> None:
     args.task_mode = normalize_task_mode(args.task_mode)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = output_dir / args.summary_name
+    progress_summary_path = output_dir / args.progress_summary_name
 
     task_ids = parse_indices(args.task_ids)
     np.random.seed(int(args.seed))
@@ -952,23 +1101,58 @@ def main() -> None:
                                 target_guidance_alpha=float(args.target_guidance_alpha),
                                 target_guidance_time_power=float(args.target_guidance_time_power),
                                 target_guidance_normalize_grad=bool(args.target_guidance_normalize_grad),
+                                target_guidance_norm=str(args.target_guidance_norm),
+                                target_guidance_use_time_weights=bool(args.target_guidance_use_time_weights),
                             )
 
                         candidate_qpos_model = generated_state[:, conditioning_prefix_len:, : model.qpos_dim]
                         candidate_qpos_raw = decode_qpos_tensor(candidate_qpos_model, model.qpos_representation)
-                        candidate_suffix_xy = fingertip_xy_from_qpos_tensor(candidate_qpos_raw)
-                        candidate_min_goal_dist = torch.linalg.norm(
-                            candidate_suffix_xy - goal_xy_t.view(1, 1, 2),
-                            dim=-1,
-                        ).amin(dim=1)
-                        retry_best_idx = int(torch.argmin(candidate_min_goal_dist).item())
-                        retry_best_dist = float(candidate_min_goal_dist[retry_best_idx].item())
+                        oracle_final_goal_dist = None
+                        if str(args.candidate_scoring) == "mujoco_rollout":
+                            generated_tau_np = generated_tau.detach().cpu().numpy()
+                            suffix_len = int(candidate_qpos_raw.shape[1])
+                            candidate_min_goal_dist_np = np.empty(int(args.num_candidates), dtype=np.float64)
+                            candidate_final_goal_dist_np = np.empty(int(args.num_candidates), dtype=np.float64)
+                            torque_start = max(0, conditioning_prefix_len - 1)
+                            torque_end = torque_start + suffix_len
+                            for candidate_idx in range(int(args.num_candidates)):
+                                min_dist, final_dist = stepper.score_torque_suffix(
+                                    qpos_raw=qpos_prefix_raw[-1],
+                                    mom=mom_prefix[-1],
+                                    torque_suffix=generated_tau_np[candidate_idx, torque_start:torque_end],
+                                    goal_xy=goal_xy,
+                                )
+                                candidate_min_goal_dist_np[candidate_idx] = min_dist
+                                candidate_final_goal_dist_np[candidate_idx] = final_dist
+                            retry_best_idx = int(np.argmin(candidate_min_goal_dist_np))
+                            retry_best_dist = float(candidate_min_goal_dist_np[retry_best_idx])
+                            oracle_final_goal_dist = float(candidate_final_goal_dist_np[retry_best_idx])
+                        else:
+                            candidate_suffix_xy = fingertip_xy_from_qpos_tensor(candidate_qpos_raw)
+                            candidate_min_goal_dist = torch.linalg.norm(
+                                candidate_suffix_xy - goal_xy_t.view(1, 1, 2),
+                                dim=-1,
+                            ).amin(dim=1)
+                            retry_best_idx = int(torch.argmin(candidate_min_goal_dist).item())
+                            retry_best_dist = float(candidate_min_goal_dist[retry_best_idx].item())
                         retry_trace.append(
                             {
                                 "retry_idx": retry_idx,
                                 "sample_seed": local_seed,
+                                "candidate_scoring": str(args.candidate_scoring),
                                 "best_candidate_idx": retry_best_idx,
-                                "best_predicted_goal_distance": retry_best_dist,
+                                "best_scored_goal_distance": retry_best_dist,
+                                "best_predicted_goal_distance": (
+                                    retry_best_dist
+                                    if str(args.candidate_scoring) == "predicted_suffix"
+                                    else None
+                                ),
+                                "best_mujoco_goal_distance": (
+                                    retry_best_dist
+                                    if str(args.candidate_scoring) == "mujoco_rollout"
+                                    else None
+                                ),
+                                "best_mujoco_final_goal_distance": oracle_final_goal_dist,
                                 "improved_over_current": bool(retry_best_dist < required_goal_distance),
                             }
                         )
@@ -1025,6 +1209,7 @@ def main() -> None:
                             "num_retries_used": best_retry_idx,
                             "num_sampling_attempts": len(retry_trace),
                             "total_candidates_evaluated": int(len(retry_trace) * int(args.num_candidates)),
+                            "candidate_scoring": str(args.candidate_scoring),
                             "retry_trace": retry_trace,
                             "chosen_retry_idx": best_retry_idx,
                             "chosen_candidate_idx": best_candidate_idx,
@@ -1125,7 +1310,10 @@ def main() -> None:
                     "target_guidance_alpha": float(args.target_guidance_alpha),
                     "target_guidance_time_power": float(args.target_guidance_time_power),
                     "target_guidance_normalize_grad": bool(args.target_guidance_normalize_grad),
+                    "target_guidance_norm": str(args.target_guidance_norm),
+                    "target_guidance_use_time_weights": bool(args.target_guidance_use_time_weights),
                     "num_candidates": int(args.num_candidates),
+                    "candidate_scoring": str(args.candidate_scoring),
                     "num_diffusion_steps": int(args.num_diffusion_steps),
                     "lookahead_steps": int(args.lookahead_steps),
                     "recent_prefix_cap": int(args.recent_prefix_cap),
@@ -1150,6 +1338,23 @@ def main() -> None:
                     "selection_trace": selection_trace,
                 }
                 summary_rows.append(row)
+                progress_summary = build_summary_payload(
+                    args=args,
+                    device=device,
+                    task_ids=task_ids,
+                    rows=summary_rows,
+                    hnn_model=hnn_model,
+                    is_complete=False,
+                    compact_rows_only=True,
+                )
+                progress_summary_path.write_text(
+                    json.dumps(progress_summary, indent=2),
+                    encoding="utf-8",
+                )
+                print(
+                    f"[GoalExpand] progress={len(summary_rows)}/{len(task_ids)} "
+                    f"progress_summary={progress_summary_path}"
+                )
                 print(
                     json.dumps(
                         {
@@ -1167,47 +1372,26 @@ def main() -> None:
                     )
                 )
 
-    summary = {
-        "checkpoint_path": args.checkpoint_path,
-        "h5_path": args.h5_path,
-        "device": str(device),
-        "seed": int(args.seed),
-        "task_mode": str(args.task_mode),
-        "task_ids": task_ids,
-        "num_candidates": int(args.num_candidates),
-        "max_sampling_retries": int(args.max_sampling_retries),
-        "retry_improvement_margin": float(args.retry_improvement_margin),
-        "num_diffusion_steps": int(args.num_diffusion_steps),
-        "lookahead_steps": int(args.lookahead_steps),
-        "recent_prefix_cap": int(args.recent_prefix_cap),
-        "reset_window_time_indices": bool(args.reset_window_time_indices),
-        "goal_tolerance": float(args.goal_tolerance),
-        "hnn_checkpoint_path": str(args.hnn_checkpoint_path) if hnn_model is not None else None,
-        "guidance_method": str(args.guidance_method) if hnn_model is not None else None,
-        "alpha_q": float(args.alpha_q) if hnn_model is not None else None,
-        "alpha_p": float(args.alpha_p) if hnn_model is not None else None,
-        "guidance_trust_lambda": float(args.guidance_trust_lambda) if hnn_model is not None else None,
-        "guidance_normalize_grad": bool(args.guidance_normalize_grad) if hnn_model is not None else None,
-        "guidance_joint_update": bool(args.guidance_joint_update) if hnn_model is not None else None,
-        "guidance_order": str(args.guidance_order),
-        "target_guidance_alpha": float(args.target_guidance_alpha),
-        "target_guidance_time_power": float(args.target_guidance_time_power),
-        "target_guidance_normalize_grad": bool(args.target_guidance_normalize_grad),
-        "max_rollout_steps": int(args.max_rollout_steps),
-        "stall_patience_steps": int(args.stall_patience_steps),
-        "random_future_target_min_initial_distance": float(args.random_future_target_min_initial_distance),
-        "aggregate": {
-            "success_rate": float(np.mean([float(row["reached_goal"]) for row in summary_rows])),
-            "best_goal_distance": aggregate_metric(summary_rows, "best_goal_distance"),
-            "final_goal_distance": aggregate_metric(summary_rows, "final_goal_distance"),
-            "qpos_mse_to_replay": aggregate_metric(summary_rows, "qpos_mse_to_replay"),
-            "mom_mse_to_replay": aggregate_metric(summary_rows, "mom_mse_to_replay"),
-            "ee_xy_mse_to_replay": aggregate_metric(summary_rows, "ee_xy_mse_to_replay"),
-        },
-        "rows": summary_rows,
-    }
-    summary_path = output_dir / args.summary_name
+    summary = build_summary_payload(
+        args=args,
+        device=device,
+        task_ids=task_ids,
+        rows=summary_rows,
+        hnn_model=hnn_model,
+        is_complete=True,
+        compact_rows_only=False,
+    )
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    progress_summary = build_summary_payload(
+        args=args,
+        device=device,
+        task_ids=task_ids,
+        rows=summary_rows,
+        hnn_model=hnn_model,
+        is_complete=True,
+        compact_rows_only=True,
+    )
+    progress_summary_path.write_text(json.dumps(progress_summary, indent=2), encoding="utf-8")
     print(f"[GoalExpand] summary={summary_path}")
     print(json.dumps(summary["aggregate"], indent=2))
 

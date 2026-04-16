@@ -268,6 +268,25 @@ Takeaway:
 - target guidance gave only a small numerical improvement on the capped benchmark
 - it did not produce a meaningful success-rate gain
 
+## Reacher-Task Reproducibility Settings
+
+Some earlier narrative summaries did not list every rollout-control argument, even though the JSON summaries/configs did record them. For the closed-loop reacher-task comparisons, the following settings should be considered part of the benchmark definition whenever present:
+
+- `task_mode = validation_random_source_random_target_across_trajs` for the harder cross-trajectory task, or `validation_random_source_random_future_target_in_traj` for the in-trajectory task.
+- `reset_window_time_indices = true` for the reset-time MPC-style rollout.
+- `lookahead_steps = 256` in the later `lh256` task runs and candidate-count sweeps; earlier retained in-trajectory runs used `lookahead_steps = 64`.
+- `recent_prefix_cap = 64`.
+- `stall_patience_steps = 500` for reset-time unbounded rollout termination.
+- `goal_tolerance = 0.01`.
+- `max_sampling_retries = 3`.
+- `retry_improvement_margin = 0.001`.
+- `random_future_target_min_initial_distance = 0.1`.
+- `cross_traj_sampling_max_tries = 128` for cross-trajectory source-target sampling.
+
+`max_sampling_retries=3` is not cosmetic: at each MPC step, the sampler may draw up to three extra candidate batches if the best candidate fails to improve predicted goal distance by at least `retry_improvement_margin`. This can affect both success behavior and runtime, especially for expensive HNN-based candidate generation.
+
+The most authoritative source for any specific run remains its saved `reacher_goal_prefix_expansion_summary.json` or `sweep_config.json`; markdown notes should be treated as summaries of those files.
+
 ## Overall Conclusion
 
 Current evidence points to:

@@ -53,6 +53,8 @@ class TrajectoryDPFSampling:
         alpha_q: float,
         time_power: float,
         normalize_grad: bool,
+        guidance_norm: str,
+        use_time_weights: bool,
     ) -> torch.Tensor:
         if alpha_q <= 0:
             return state_phys
@@ -72,20 +74,34 @@ class TrajectoryDPFSampling:
 
         ee_xy = self._reacher_fingertip_xy_from_qpos_raw(suffix_qpos_raw)
         goal_xy = target_xy[:, None, :]
-        sq_error = torch.sum((ee_xy - goal_xy) ** 2, dim=-1)
+        abs_error = torch.abs(ee_xy - goal_xy)
+        if guidance_norm == "l2":
+            per_step_error = torch.sum(abs_error ** 2, dim=-1)
+        elif guidance_norm == "l1":
+            per_step_error = torch.sum(abs_error, dim=-1)
+        elif guidance_norm == "linf":
+            per_step_error = torch.amax(abs_error, dim=-1)
+        else:
+            raise ValueError(
+                f"Unsupported target guidance norm={guidance_norm!r}. "
+                "Valid values: {'l2', 'l1', 'linf'}"
+            )
 
-        suffix_len = sq_error.shape[1]
-        weights = torch.linspace(
-            1.0 / max(suffix_len, 1),
-            1.0,
-            suffix_len,
-            device=state_var.device,
-            dtype=state_var.dtype,
-        )
-        if time_power != 1.0:
-            weights = weights.pow(float(time_power))
-        weights = weights / torch.clamp(weights.sum(), min=1e-8)
-        loss = (sq_error * weights.view(1, -1)).sum(dim=1).mean()
+        if use_time_weights:
+            suffix_len = per_step_error.shape[1]
+            weights = torch.linspace(
+                1.0 / max(suffix_len, 1),
+                1.0,
+                suffix_len,
+                device=state_var.device,
+                dtype=state_var.dtype,
+            )
+            if time_power != 1.0:
+                weights = weights.pow(float(time_power))
+            weights = weights / torch.clamp(weights.sum(), min=1e-8)
+            loss = (per_step_error * weights.view(1, -1)).sum(dim=1).mean()
+        else:
+            loss = per_step_error.mean()
 
         grad_q = torch.autograd.grad(loss, qpos_encoded, retain_graph=False, create_graph=False)[0]
         if normalize_grad:
@@ -344,6 +360,8 @@ class TrajectoryDPFSampling:
         target_guidance_alpha: float = 0.0,
         target_guidance_time_power: float = 2.0,
         target_guidance_normalize_grad: bool = True,
+        target_guidance_norm: str = "l2",
+        target_guidance_use_time_weights: bool = True,
         guidance_order: str = "hnn_then_target",
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -377,6 +395,8 @@ class TrajectoryDPFSampling:
             target_guidance_alpha: one-step target guidance step size applied to q only
             target_guidance_time_power: larger values emphasize later suffix timesteps more strongly
             target_guidance_normalize_grad: normalize target-guidance q gradients before the step
+            target_guidance_norm: end-effector norm used for target guidance loss
+            target_guidance_use_time_weights: whether to apply late-timestep weighting over the suffix
             guidance_order: ordering of target vs HNN guidance when both are enabled.
                 Supported values: "hnn_then_target", "target_then_hnn"
             dt: timestep used to parameterize random torque generation (seconds between torque samples).
@@ -873,6 +893,8 @@ class TrajectoryDPFSampling:
                             alpha_q=float(target_guidance_alpha),
                             time_power=float(target_guidance_time_power),
                             normalize_grad=bool(target_guidance_normalize_grad),
+                            guidance_norm=str(target_guidance_norm),
+                            use_time_weights=bool(target_guidance_use_time_weights),
                         )
 
                     if guidance_order == "target_then_hnn":
@@ -897,6 +919,8 @@ class TrajectoryDPFSampling:
                         alpha_q=float(target_guidance_alpha),
                         time_power=float(target_guidance_time_power),
                         normalize_grad=bool(target_guidance_normalize_grad),
+                        guidance_norm=str(target_guidance_norm),
+                        use_time_weights=bool(target_guidance_use_time_weights),
                     )
                     x0 = self.normalize_state(x0_phys).detach()
 
