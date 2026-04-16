@@ -46,8 +46,10 @@ Runtime columns should be interpreted as:
 
 - `wall_clock_to_eval_start_s`: elapsed trainer time right before the fixed-task evaluation started
 - `total_wall_clock_s`: total trainer wall-clock from launch to completion, when a saved trainer log is available
+- `evaluation_wall_clock_seconds`: direct evaluation duration, saved by the patched evaluator for future runs
+- `task_wall_clock_seconds`: direct per-source-target task evaluation time, also saved by the patched evaluator for future runs
 
-The RL evaluator has also been updated so future runs will save `task_wall_clock_seconds` per source-target evaluation task directly.
+The RL evaluator has also been updated so future runs will save both `evaluation_wall_clock_seconds` and `task_wall_clock_seconds` directly.
 
 ## Reported Metrics
 

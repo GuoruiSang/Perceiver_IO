@@ -6,7 +6,8 @@ This note records the finished SB3 SAC and TD3 runs on the fixed 10-task IID-uni
 
 - `wall_clock_to_eval_start_s`: elapsed trainer time recorded right before that fixed-task evaluation started.
 - `total_wall_clock_s`: full trainer wall-clock from launch to completion, from the saved trainer log.
-- historical note: these finished SAC/TD3 runs store checkpoint-level wall-clock and per-task `steps_taken`, but they do not store per-source-target task wall-clock. The evaluator has now been patched so future runs will save `task_wall_clock_seconds` per task directly.
+- `final_eval_wall_clock_s`: recovered final fixed-10-task evaluation duration for these finished historical runs, computed as `total_wall_clock_s - wall_clock_to_final_eval_start_s`.
+- historical note: these finished SAC/TD3 runs store checkpoint-level wall-clock and per-task `steps_taken`, but they did not directly store evaluation duration or per-source-target task wall-clock. The evaluator has now been patched so future runs will save both `evaluation_wall_clock_seconds` and `task_wall_clock_seconds` directly.
 
 ## Main Paths
 
@@ -30,10 +31,10 @@ This note records the finished SB3 SAC and TD3 runs on the fixed 10-task IID-uni
 
 ## Full Training Results
 
-| algorithm | best step | best success_rate | best_goal_mean | best final_goal_mean | wall_clock_to_best_eval_start_s | final step | final success_rate | final best_goal_mean | final final_goal_mean | wall_clock_to_final_eval_start_s | total_wall_clock_s |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| SAC | 210000 | 0.700 | 0.056294 | 0.064555 | 540.833 | 300000 | 0.200 | 0.063283 | 0.149549 | 831.896 | 853.3 |
-| TD3 | 30000 | 1.000 | 0.008437 | 0.008437 | 48.958 | 300000 | 0.700 | 0.049028 | 0.074556 | 532.549 | 539.6 |
+| algorithm | best step | best success_rate | best_goal_mean | best final_goal_mean | wall_clock_to_best_eval_start_s | final step | final success_rate | final best_goal_mean | final final_goal_mean | wall_clock_to_final_eval_start_s | final_eval_wall_clock_s | total_wall_clock_s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| SAC | 210000 | 0.700 | 0.056294 | 0.064555 | 540.833 | 300000 | 0.200 | 0.063283 | 0.149549 | 831.896 | 21.404 | 853.3 |
+| TD3 | 30000 | 1.000 | 0.008437 | 0.008437 | 48.958 | 300000 | 0.700 | 0.049028 | 0.074556 | 532.549 | 7.051 | 539.6 |
 
 ## Checkpoints To Use
 
@@ -53,3 +54,4 @@ Latest checkpoints, if needed for completeness:
 - TD3 reached `success_rate = 1.0` at `30k` with `best_goal_mean = 0.008437`, which is already close to the pure MuJoCo IID random-shooting baseline.
 - Both SAC and TD3 degraded after their best checkpoints, so `best_eval.zip` matters more than `latest.zip`.
 - SAC improved during training, but even its best checkpoint stayed clearly behind TD3 here.
+- The final fixed-10-task evaluation itself was short compared with training: about `21.4 s` for SAC and `7.1 s` for TD3.

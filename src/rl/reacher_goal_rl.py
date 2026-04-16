@@ -446,6 +446,7 @@ def evaluate_policy_on_tasks(
     output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = output_dir / summary_name
     progress_path = output_dir / progress_summary_name
+    eval_start_time = time.time()
 
     tasks = collect_fixed_tasks(
         h5_path=eval_h5_path,
@@ -594,6 +595,8 @@ def evaluate_policy_on_tasks(
                 "task_metadata": task.get("metadata", {}),
             }
             rows.append(row)
+            progress_metadata = dict(extra_metadata or {})
+            progress_metadata["evaluation_wall_clock_seconds_so_far"] = float(time.time() - eval_start_time)
             progress_payload = build_rl_summary_payload(
                 algorithm=algorithm,
                 checkpoint_path=checkpoint_path,
@@ -612,10 +615,12 @@ def evaluate_policy_on_tasks(
                 budgets=budgets,
                 is_complete=False,
                 compact_rows_only=True,
-                extra_metadata=extra_metadata,
+                extra_metadata=progress_metadata,
             )
             write_json(progress_path, progress_payload)
 
+    summary_metadata = dict(extra_metadata or {})
+    summary_metadata["evaluation_wall_clock_seconds"] = float(time.time() - eval_start_time)
     summary_payload = build_rl_summary_payload(
         algorithm=algorithm,
         checkpoint_path=checkpoint_path,
@@ -634,7 +639,7 @@ def evaluate_policy_on_tasks(
         budgets=budgets,
         is_complete=True,
         compact_rows_only=False,
-        extra_metadata=extra_metadata,
+        extra_metadata=summary_metadata,
     )
     write_json(summary_path, summary_payload)
     write_json(
@@ -657,7 +662,7 @@ def evaluate_policy_on_tasks(
             budgets=budgets,
             is_complete=True,
             compact_rows_only=True,
-            extra_metadata=extra_metadata,
+            extra_metadata=summary_metadata,
         ),
     )
     return summary_payload
