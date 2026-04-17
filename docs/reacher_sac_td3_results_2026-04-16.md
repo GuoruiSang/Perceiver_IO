@@ -8,6 +8,8 @@ This note records the finished SB3 SAC and TD3 runs on the fixed 10-task IID-uni
 - `total_wall_clock_s`: full trainer wall-clock from launch to completion, from the saved trainer log.
 - `final_eval_wall_clock_s`: recovered final fixed-10-task evaluation duration for these finished historical runs, computed as `total_wall_clock_s - wall_clock_to_final_eval_start_s`.
 - historical note: these finished SAC/TD3 runs store checkpoint-level wall-clock and per-task `steps_taken`, but they did not directly store evaluation duration or per-source-target task wall-clock. The evaluator has now been patched so future runs will save both `evaluation_wall_clock_seconds` and `task_wall_clock_seconds` directly.
+- `mean_steps_to_best_goal_dist`: mean executed control-step index at which each task first reached its minimum goal distance during that evaluation.
+- `mean_steps_to_final_goal_dist`: mean executed control steps per task for that evaluation.
 
 ## Main Paths
 
@@ -24,10 +26,10 @@ This note records the finished SB3 SAC and TD3 runs on the fixed 10-task IID-uni
 
 ## Tune Results
 
-| algorithm | selected variant | selected step | success_rate | best_goal_mean | final_goal_mean | wall_clock_to_eval_start_s | extra runtime note |
-|---|---|---:|---:|---:|---:|---:|---|
-| SAC | `lowlr1e4_ls1000_30k` | 10000 | 0.400 | 0.063795 | 0.117747 | 28.366 | SAC tune logs were not retained separately, so only pre-eval wall-clock is available |
-| TD3 | `lowlr1e4_noise0p1_30k` | 20000 | 0.900 | 0.007631 | 0.018975 | 41.659 | total wall-clock for this 30k run was `85.0 s` |
+| algorithm | selected variant | selected step | success_rate | best_goal_mean | final_goal_mean | mean_steps_to_best_goal_dist | mean_steps_to_final_goal_dist | wall_clock_to_eval_start_s | extra runtime note |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| SAC | `lowlr1e4_ls1000_30k` | 10000 | 0.400 | 0.063795 | 0.117747 | 1646.7 | 1946.7 | 28.366 | SAC tune logs were not retained separately, so only pre-eval wall-clock is available |
+| TD3 | `lowlr1e4_noise0p1_30k` | 20000 | 0.900 | 0.007631 | 0.018975 | 2186.6 | 2231.5 | 41.659 | total wall-clock for this 30k run was `85.0 s` |
 
 ## Full Training Results
 
@@ -35,6 +37,15 @@ This note records the finished SB3 SAC and TD3 runs on the fixed 10-task IID-uni
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | SAC | 210000 | 0.700 | 0.056294 | 0.064555 | 540.833 | 300000 | 0.200 | 0.063283 | 0.149549 | 831.896 | 21.404 | 853.3 |
 | TD3 | 30000 | 1.000 | 0.008437 | 0.008437 | 48.958 | 300000 | 0.700 | 0.049028 | 0.074556 | 532.549 | 7.051 | 539.6 |
+
+## Evaluation Step Metrics
+
+These are normalized executed control steps from the fixed 10-task evaluation summaries.
+
+| algorithm | tune selected step | tune mean_steps_to_best_goal_dist | tune mean_steps_to_final_goal_dist | best checkpoint mean_steps_to_best_goal_dist | best checkpoint mean_steps_to_final_goal_dist | final checkpoint mean_steps_to_best_goal_dist | final checkpoint mean_steps_to_final_goal_dist |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| SAC | 10000 | 1646.7 | 1946.7 | 1921.2 | 2071.2 | 2636.7 | 3307.9 |
+| TD3 | 20000 | 2186.6 | 2231.5 | 2112.0 | 2112.0 | 1320.4 | 1470.4 |
 
 ## Checkpoints To Use
 
