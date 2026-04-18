@@ -471,6 +471,7 @@ def compare_generated_with_reconstructed(
     prefix_len: int = 0,
     qpos_representation: str = "raw",
     highlight_indices: dict[str, int] | None = None,
+    plot_dpi: int = 300,
 ) -> dict:
     """
     Compare generated trajectory with physics-reconstructed trajectory.
@@ -562,6 +563,7 @@ def compare_generated_with_reconstructed(
             nrows,
             ncols,
             figsize=(30, 10),
+            dpi=int(plot_dpi),
             constrained_layout=True,
         )
         
@@ -672,6 +674,7 @@ def compare_multiple_generated_with_reconstructed(
     trajectory_alignment: str = 'pre_step',
     prefix_len: int = 0,
     qpos_representation: str = "raw",
+    plot_dpi: int = 300,
 ) -> dict:
     """
     Overlay multiple sampled branches from the same history prefix in the same
@@ -699,7 +702,7 @@ def compare_multiple_generated_with_reconstructed(
     ]
 
     nrows, ncols = 3, max(v.shape[-1] for v in generated_list[0].values())
-    fig, axes = plt.subplots(nrows, ncols, figsize=(30, 10))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(30, 10), dpi=int(plot_dpi))
     mean_mse_q = float(np.mean([row['mse_qpos'] for row in series_rows]))
     mean_mse_p = float(np.mean([row['mse_mom'] for row in series_rows]))
     mean_mse_total = float(np.mean([row['mse_total'] for row in series_rows]))
