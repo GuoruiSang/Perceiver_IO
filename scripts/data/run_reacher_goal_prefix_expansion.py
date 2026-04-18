@@ -252,6 +252,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--condition_suffix_last_state_on_goal",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Use endpoint-conditioned inpainting during DPF sampling: keep the observed online prefix, "
+            "pin the final suffix state to the target state (qpos+mom only), and generate the "
+            "interior suffix states."
+        ),
+    )
+    parser.add_argument(
         "--max_prefix_len",
         "--max_rollout_steps",
         dest="max_rollout_steps",
@@ -460,10 +470,14 @@ def build_observed_windows(
     sample_horizon: int,
     model: TrajectoryDPF,
     device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    condition_suffix_last_state_on_goal: bool = False,
+    target_qpos_raw: np.ndarray | None = None,
+    target_mom: np.ndarray | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     observed_qpos = torch.zeros((1, sample_horizon, model.qpos_dim), dtype=torch.float32, device=device)
     observed_mom = torch.zeros((1, sample_horizon, model.mom_dim), dtype=torch.float32, device=device)
     observed_tau = torch.zeros((1, sample_horizon, model.torque_dim), dtype=torch.float32, device=device)
+    observed_state_mask = torch.zeros((1, sample_horizon, model.state_dim), dtype=torch.bool, device=device)
 
     qpos_window_raw = np.asarray(qpos_prefix_raw[crop_start : crop_start + conditioning_prefix_len], dtype=np.float32)
     mom_window = np.asarray(mom_prefix[crop_start : crop_start + conditioning_prefix_len], dtype=np.float32)
@@ -471,12 +485,27 @@ def build_observed_windows(
 
     observed_qpos[0, :conditioning_prefix_len] = torch.from_numpy(qpos_window_model).to(device=device)
     observed_mom[0, :conditioning_prefix_len] = torch.from_numpy(mom_window).to(device=device)
+    observed_state_mask[0, :conditioning_prefix_len, :] = True
 
     if conditioning_prefix_len > 1:
         tau_window = np.asarray(torque_prefix[crop_start : crop_start + conditioning_prefix_len - 1], dtype=np.float32)
         observed_tau[0, : conditioning_prefix_len - 1] = torch.from_numpy(tau_window).to(device=device)
 
-    return observed_qpos, observed_mom, observed_tau
+    if condition_suffix_last_state_on_goal:
+        if target_qpos_raw is None or target_mom is None:
+            raise ValueError(
+                "target_qpos_raw and target_mom are required when condition_suffix_last_state_on_goal is enabled."
+            )
+        target_qpos_model = encode_qpos_array(
+            np.asarray(target_qpos_raw, dtype=np.float32)[None, :],
+            model.qpos_representation,
+        )[0].astype(np.float32, copy=False)
+        target_mom = np.asarray(target_mom, dtype=np.float32)
+        observed_qpos[0, sample_horizon - 1] = torch.from_numpy(target_qpos_model).to(device=device)
+        observed_mom[0, sample_horizon - 1] = torch.from_numpy(target_mom).to(device=device)
+        observed_state_mask[0, sample_horizon - 1, : model.qpos_dim + model.mom_dim] = True
+
+    return observed_qpos, observed_mom, observed_tau, observed_state_mask
 
 
 def setup_workspace_axis(ax: plt.Axes, goal_xy: np.ndarray, goal_tolerance: float) -> None:
@@ -713,7 +742,11 @@ def build_summary_payload(
         "completed_task_ids": [int(row["task_id"]) for row in rows],
         "is_complete": bool(is_complete),
         "num_candidates": int(args.num_candidates),
+        "condition_suffix_last_state_on_goal": bool(args.condition_suffix_last_state_on_goal),
         "candidate_scoring": str(args.candidate_scoring),
+        "effective_candidate_scoring": (
+            None if bool(args.condition_suffix_last_state_on_goal) else str(args.candidate_scoring)
+        ),
         "max_sampling_retries": int(args.max_sampling_retries),
         "retry_improvement_margin": float(args.retry_improvement_margin),
         "num_diffusion_steps": int(args.num_diffusion_steps),
@@ -806,6 +839,8 @@ def build_validation_random_source_random_future_target_task(
         "task_label": f"traj_{traj_index:04d}_t{source_index:04d}_rt{target_index:04d}",
         "task_mode": TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_FUTURE_TARGET,
         "goal_xy": goal_xy,
+        "target_qpos_raw": full_qpos_raw[target_index].copy(),
+        "target_mom": full_mom[target_index].copy(),
         "initial_qpos_raw": replay_qpos_raw[0].copy(),
         "initial_mom": replay_mom[0].copy(),
         "reference_qpos_raw": replay_qpos_raw,
@@ -870,6 +905,8 @@ def build_validation_random_source_random_target_across_trajs_task(
         initial_goal_distance = float(np.linalg.norm(source_ee_xy_full[source_index] - goal_xy))
         if initial_goal_distance < min_initial_distance:
             continue
+        target_qpos_raw_full = target_traj["seq_qpos"][:].astype(np.float64)
+        target_mom_full = target_traj["seq_mom"][:].astype(np.float64)
 
         remaining_len = int(source_qpos_raw_full.shape[0] - source_index)
         task_rollout_limit = max(2, min(int(rollout_limit), remaining_len))
@@ -887,6 +924,8 @@ def build_validation_random_source_random_target_across_trajs_task(
             ),
             "task_mode": TASK_MODE_VALIDATION_RANDOM_SOURCE_RANDOM_TARGET_ACROSS_TRAJS,
             "goal_xy": goal_xy,
+            "target_qpos_raw": target_qpos_raw_full[target_index].copy(),
+            "target_mom": target_mom_full[target_index].copy(),
             "initial_qpos_raw": replay_qpos_raw[0].copy(),
             "initial_mom": replay_mom[0].copy(),
             "reference_qpos_raw": replay_qpos_raw,
@@ -930,6 +969,19 @@ def main() -> None:
     print(f"[GoalExpand] output_dir={output_dir}")
     print(f"[GoalExpand] task_mode={args.task_mode}")
     print(f"[GoalExpand] task_ids={task_ids}")
+    if bool(args.condition_suffix_last_state_on_goal):
+        if int(args.num_candidates) != 1:
+            print(
+                f"[GoalExpand] condition_suffix_last_state_on_goal=True overrides "
+                f"num_candidates {args.num_candidates} -> 1"
+            )
+            args.num_candidates = 1
+        if int(args.max_sampling_retries) != 0:
+            print(
+                f"[GoalExpand] condition_suffix_last_state_on_goal=True disables retry scoring; "
+                f"overriding max_sampling_retries {args.max_sampling_retries} -> 0"
+            )
+            args.max_sampling_retries = 0
 
     model = TrajectoryDPF.load_from_checkpoint(args.checkpoint_path, map_location=device)
     model = model.to(device)
@@ -978,6 +1030,8 @@ def main() -> None:
                     )
 
                 goal_xy = np.asarray(task["goal_xy"], dtype=np.float64)
+                target_qpos_raw = np.asarray(task["target_qpos_raw"], dtype=np.float64)
+                target_mom = np.asarray(task["target_mom"], dtype=np.float64)
                 initial_qpos_raw = np.asarray(task["initial_qpos_raw"], dtype=np.float64)
                 initial_mom = np.asarray(task["initial_mom"], dtype=np.float64)
                 reference_qpos_raw = task["reference_qpos_raw"]
@@ -1002,6 +1056,7 @@ def main() -> None:
                 stopped_due_to_stall = False
                 selection_trace: list[dict] = []
                 reached_goal = rollout_goal_distances[-1] <= float(args.goal_tolerance)
+                use_endpoint_inpainting = bool(args.condition_suffix_last_state_on_goal)
                 while not reached_goal:
                     if (not use_unbounded_reset_rollout) and len(qpos_prefix_raw) >= task_rollout_limit:
                         break
@@ -1030,7 +1085,7 @@ def main() -> None:
                         )
                         sample_horizon = sample_horizon_abs - crop_start
 
-                    observed_qpos, observed_mom, observed_tau = build_observed_windows(
+                    observed_qpos, observed_mom, observed_tau, observed_state_mask = build_observed_windows(
                         qpos_prefix_raw=qpos_prefix_raw,
                         mom_prefix=mom_prefix,
                         torque_prefix=torque_prefix,
@@ -1039,6 +1094,9 @@ def main() -> None:
                         sample_horizon=sample_horizon,
                         model=model,
                         device=device,
+                        condition_suffix_last_state_on_goal=bool(args.condition_suffix_last_state_on_goal),
+                        target_qpos_raw=target_qpos_raw,
+                        target_mom=target_mom,
                     )
                     if bool(args.reset_window_time_indices):
                         time_indices = torch.arange(
@@ -1086,6 +1144,7 @@ def main() -> None:
                                 observed_qpos=observed_qpos,
                                 observed_mom=observed_mom,
                                 observed_torque=observed_tau,
+                                observed_state_mask=observed_state_mask,
                                 time_indices=time_indices,
                                 use_ema=False,
                                 sampler="ddim",
@@ -1105,66 +1164,80 @@ def main() -> None:
                                 target_guidance_use_time_weights=bool(args.target_guidance_use_time_weights),
                             )
 
-                        candidate_qpos_model = generated_state[:, conditioning_prefix_len:, : model.qpos_dim]
-                        candidate_qpos_raw = decode_qpos_tensor(candidate_qpos_model, model.qpos_representation)
+                        generated_tau_np = generated_tau.detach().cpu().numpy()
                         oracle_final_goal_dist = None
-                        if str(args.candidate_scoring) == "mujoco_rollout":
-                            generated_tau_np = generated_tau.detach().cpu().numpy()
-                            suffix_len = int(candidate_qpos_raw.shape[1])
-                            candidate_min_goal_dist_np = np.empty(int(args.num_candidates), dtype=np.float64)
-                            candidate_final_goal_dist_np = np.empty(int(args.num_candidates), dtype=np.float64)
-                            torque_start = max(0, conditioning_prefix_len - 1)
-                            torque_end = torque_start + suffix_len
-                            for candidate_idx in range(int(args.num_candidates)):
-                                min_dist, final_dist = stepper.score_torque_suffix(
-                                    qpos_raw=qpos_prefix_raw[-1],
-                                    mom=mom_prefix[-1],
-                                    torque_suffix=generated_tau_np[candidate_idx, torque_start:torque_end],
-                                    goal_xy=goal_xy,
-                                )
-                                candidate_min_goal_dist_np[candidate_idx] = min_dist
-                                candidate_final_goal_dist_np[candidate_idx] = final_dist
-                            retry_best_idx = int(np.argmin(candidate_min_goal_dist_np))
-                            retry_best_dist = float(candidate_min_goal_dist_np[retry_best_idx])
-                            oracle_final_goal_dist = float(candidate_final_goal_dist_np[retry_best_idx])
+                        if use_endpoint_inpainting:
+                            retry_best_idx = 0
+                            retry_best_dist = None
+                            retry_scoring_mode = "single_inpaint_unscored"
                         else:
-                            candidate_suffix_xy = fingertip_xy_from_qpos_tensor(candidate_qpos_raw)
-                            candidate_min_goal_dist = torch.linalg.norm(
-                                candidate_suffix_xy - goal_xy_t.view(1, 1, 2),
-                                dim=-1,
-                            ).amin(dim=1)
-                            retry_best_idx = int(torch.argmin(candidate_min_goal_dist).item())
-                            retry_best_dist = float(candidate_min_goal_dist[retry_best_idx].item())
+                            candidate_qpos_model = generated_state[:, conditioning_prefix_len:, : model.qpos_dim]
+                            candidate_qpos_raw = decode_qpos_tensor(candidate_qpos_model, model.qpos_representation)
+                            if str(args.candidate_scoring) == "mujoco_rollout":
+                                suffix_len = int(candidate_qpos_raw.shape[1])
+                                candidate_min_goal_dist_np = np.empty(int(args.num_candidates), dtype=np.float64)
+                                candidate_final_goal_dist_np = np.empty(int(args.num_candidates), dtype=np.float64)
+                                torque_start = max(0, conditioning_prefix_len - 1)
+                                torque_end = torque_start + suffix_len
+                                for candidate_idx in range(int(args.num_candidates)):
+                                    min_dist, final_dist = stepper.score_torque_suffix(
+                                        qpos_raw=qpos_prefix_raw[-1],
+                                        mom=mom_prefix[-1],
+                                        torque_suffix=generated_tau_np[candidate_idx, torque_start:torque_end],
+                                        goal_xy=goal_xy,
+                                    )
+                                    candidate_min_goal_dist_np[candidate_idx] = min_dist
+                                    candidate_final_goal_dist_np[candidate_idx] = final_dist
+                                retry_best_idx = int(np.argmin(candidate_min_goal_dist_np))
+                                retry_best_dist = float(candidate_min_goal_dist_np[retry_best_idx])
+                                oracle_final_goal_dist = float(candidate_final_goal_dist_np[retry_best_idx])
+                            else:
+                                candidate_suffix_xy = fingertip_xy_from_qpos_tensor(candidate_qpos_raw)
+                                candidate_min_goal_dist = torch.linalg.norm(
+                                    candidate_suffix_xy - goal_xy_t.view(1, 1, 2),
+                                    dim=-1,
+                                ).amin(dim=1)
+                                retry_best_idx = int(torch.argmin(candidate_min_goal_dist).item())
+                                retry_best_dist = float(candidate_min_goal_dist[retry_best_idx].item())
+                            retry_scoring_mode = str(args.candidate_scoring)
                         retry_trace.append(
                             {
                                 "retry_idx": retry_idx,
                                 "sample_seed": local_seed,
-                                "candidate_scoring": str(args.candidate_scoring),
+                                "candidate_scoring": retry_scoring_mode,
                                 "best_candidate_idx": retry_best_idx,
                                 "best_scored_goal_distance": retry_best_dist,
                                 "best_predicted_goal_distance": (
                                     retry_best_dist
-                                    if str(args.candidate_scoring) == "predicted_suffix"
+                                    if retry_scoring_mode == "predicted_suffix"
                                     else None
                                 ),
                                 "best_mujoco_goal_distance": (
                                     retry_best_dist
-                                    if str(args.candidate_scoring) == "mujoco_rollout"
+                                    if retry_scoring_mode == "mujoco_rollout"
                                     else None
                                 ),
                                 "best_mujoco_final_goal_distance": oracle_final_goal_dist,
-                                "improved_over_current": bool(retry_best_dist < required_goal_distance),
+                                "improved_over_current": (
+                                    None if retry_best_dist is None else bool(retry_best_dist < required_goal_distance)
+                                ),
                             }
                         )
 
-                        if retry_best_dist < best_candidate_goal_distance:
-                            best_candidate_goal_distance = retry_best_dist
+                        candidate_is_better = (
+                            best_generated_tau is None
+                            if retry_best_dist is None
+                            else retry_best_dist < best_candidate_goal_distance
+                        )
+                        if candidate_is_better:
+                            if retry_best_dist is not None:
+                                best_candidate_goal_distance = retry_best_dist
                             best_candidate_idx = retry_best_idx
                             best_retry_idx = retry_idx
                             best_retry_seed = local_seed
-                            best_generated_tau = generated_tau.detach().cpu().numpy()
+                            best_generated_tau = generated_tau_np
 
-                        if retry_best_dist < required_goal_distance:
+                        if retry_best_dist is not None and retry_best_dist < required_goal_distance:
                             break
 
                     if best_generated_tau is None or best_candidate_idx < 0:
@@ -1209,11 +1282,17 @@ def main() -> None:
                             "num_retries_used": best_retry_idx,
                             "num_sampling_attempts": len(retry_trace),
                             "total_candidates_evaluated": int(len(retry_trace) * int(args.num_candidates)),
-                            "candidate_scoring": str(args.candidate_scoring),
+                            "candidate_scoring": (
+                                "single_inpaint_unscored"
+                                if use_endpoint_inpainting
+                                else str(args.candidate_scoring)
+                            ),
                             "retry_trace": retry_trace,
                             "chosen_retry_idx": best_retry_idx,
                             "chosen_candidate_idx": best_candidate_idx,
-                            "chosen_candidate_best_goal_dist": best_candidate_goal_distance,
+                            "chosen_candidate_best_goal_dist": (
+                                None if use_endpoint_inpainting else best_candidate_goal_distance
+                            ),
                             "applied_tau": applied_tau.tolist(),
                             "result_goal_distance": next_goal_distance,
                             "best_goal_distance_so_far": float(best_goal_distance_so_far),

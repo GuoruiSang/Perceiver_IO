@@ -165,6 +165,54 @@ class TrajectoryDPFSampling:
         x[:, :prefix_len, :] = observed_prefix_state_norm[:, :prefix_len, :]
         return x
 
+    def _expand_sampling_state_mask(
+        self,
+        mask: Optional[torch.Tensor],
+        num_samples: int,
+        trajectory_length: int,
+        expected_last_dim: int,
+        name: str,
+    ) -> Optional[torch.Tensor]:
+        if mask is None:
+            return None
+        if mask.ndim != 3:
+            raise ValueError(f"{name} must have shape [B,T,{expected_last_dim}], got {tuple(mask.shape)}")
+        if mask.shape[-1] != expected_last_dim:
+            raise ValueError(
+                f"{name} last dim must equal {expected_last_dim}, got {mask.shape[-1]}"
+            )
+        if mask.shape[1] < trajectory_length:
+            raise ValueError(
+                f"{name} must have at least trajectory_length={trajectory_length} timesteps, got {mask.shape[1]}"
+            )
+        if mask.shape[0] == 1 and num_samples > 1:
+            mask = mask.expand(num_samples, -1, -1)
+        elif mask.shape[0] != num_samples:
+            raise ValueError(
+                f"{name} batch dim must be 1 or num_samples={num_samples}, got {mask.shape[0]}"
+            )
+        return mask[:, :trajectory_length, :].to(device=self.device, dtype=torch.bool)
+
+    def _apply_observed_state_constraint(
+        self,
+        x: torch.Tensor,
+        observed_state_norm: Optional[torch.Tensor],
+        observed_state_mask: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        if observed_state_norm is None or observed_state_mask is None:
+            return x
+        if observed_state_norm.shape != x.shape:
+            raise ValueError(
+                "observed_state_norm must match x shape when observed_state_mask is provided: "
+                f"got {tuple(observed_state_norm.shape)} vs {tuple(x.shape)}"
+            )
+        if observed_state_mask.shape != x.shape:
+            raise ValueError(
+                "observed_state_mask must match x shape: "
+                f"got {tuple(observed_state_mask.shape)} vs {tuple(x.shape)}"
+            )
+        return torch.where(observed_state_mask, observed_state_norm, x)
+
     def _build_sampling_context_indices(
         self,
         seq_len: int,
@@ -326,6 +374,7 @@ class TrajectoryDPFSampling:
         observed_qpos: torch.Tensor = None,
         observed_mom: torch.Tensor = None,
         observed_torque: torch.Tensor = None,
+        observed_state_mask: torch.Tensor = None,
         time_indices: Optional[torch.Tensor] = None,
         use_ema: bool = True,
         sampler: str = "ddim",
@@ -465,6 +514,9 @@ class TrajectoryDPFSampling:
         observed_torque = self._expand_sampling_tensor(
             observed_torque, num_samples, trajectory_length, self.torque_dim, "observed_torque"
         )
+        observed_state_mask = self._expand_sampling_state_mask(
+            observed_state_mask, num_samples, trajectory_length, self.state_dim, "observed_state_mask"
+        )
         target_xy = self._expand_target_xy(target_xy, num_samples)
         if time_indices is not None:
             time_indices = time_indices.to(device=device, dtype=torch.long)
@@ -530,6 +582,7 @@ class TrajectoryDPFSampling:
             x = torch.randn(num_samples, trajectory_length, self.state_dim, device=device)
 
         observed_prefix_state_norm = None
+        observed_full_state_norm = None
         if resolved_sample_mode == "train_matched_completion":
             observed_state = self._build_sampling_state(
                 observed_qpos,
@@ -537,7 +590,9 @@ class TrajectoryDPFSampling:
                 torque=observed_torque if self.unconditional_tau_in_state else None,
             )
             observed_prefix_state_norm = self.normalize_state(observed_state)
+            observed_full_state_norm = observed_prefix_state_norm
             x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
+            x = self._apply_observed_state_constraint(x, observed_full_state_norm, observed_state_mask)
         
         if not self.unconditional_tau_in_state:
             # Normalized conditioning (torque passed separately for AdaLN)
@@ -568,16 +623,26 @@ class TrajectoryDPFSampling:
             # For train-matched completion, use a subset of the full clean-prefix/noisy-suffix query.
             # For generic full-trajectory sampling, cap context length to the training regime.
             if resolved_sample_mode == "train_matched_completion":
-                num_context = prefix_len
-                context_idx = self._build_sampling_context_indices(
-                    trajectory_length,
-                    num_context,
-                    device=device,
-                    strategy="query_subset",
-                )
+                observed_token_idx = None
+                if observed_state_mask is not None:
+                    observed_token_idx = torch.nonzero(
+                        observed_state_mask.any(dim=-1)[0],
+                        as_tuple=False,
+                    ).squeeze(-1)
+                if observed_token_idx is not None and observed_token_idx.numel() > 0:
+                    context_idx = torch.unique(observed_token_idx, sorted=True)
+                    num_context = int(context_idx.numel())
+                else:
+                    num_context = prefix_len
+                    context_idx = self._build_sampling_context_indices(
+                        trajectory_length,
+                        num_context,
+                        device=device,
+                        strategy="query_subset",
+                    )
                 print(
                     f"[Sampling] Train-matched completion mode with observed prefix_len={prefix_len} "
-                    f"and query-subset context size={num_context}"
+                    f"and context size={num_context}"
                 )
             else:
                 max_context_train = int(self.max_timesteps * context_fraction)
@@ -622,6 +687,7 @@ class TrajectoryDPFSampling:
         def _predict_eps_cfg(x_in: torch.Tensor, timestep_int: int, cond_in: torch.Tensor, cond_uncond_in: torch.Tensor) -> torch.Tensor:
             """Predict epsilon with optional CFG for arbitrary batch size."""
             x_in = self._apply_observed_prefix_constraint(x_in, observed_prefix_state_norm, prefix_len)
+            x_in = self._apply_observed_state_constraint(x_in, observed_full_state_norm, observed_state_mask)
             if self.unconditional_tau_in_state:
                 tokens = self.build_tokens(
                     x_in,
@@ -769,6 +835,7 @@ class TrajectoryDPFSampling:
 
         for i, t in enumerate(tqdm(ts, total=len(ts), desc="Sampling")):
             x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
+            x = self._apply_observed_state_constraint(x, observed_full_state_norm, observed_state_mask)
             t_int = int(t.item())
             eps = _predict_eps_cfg(x, t_int, cond, cond_uncond)
             
@@ -824,15 +891,16 @@ class TrajectoryDPFSampling:
                             x = x0
                         else:
                             t_prev_local = int(ts[i + 1].item())
-                            x = _strategy1_pick_xt_prev(
+                        x = _strategy1_pick_xt_prev(
                                 x_t_local=x_t,
                                 eps_t_local=eps,
                                 a_bar_t_local=a_bar_t,
                                 a_bar_prev_local=a_bar_prev,
                                 is_last_step=is_last,
                                 t_prev_local_int=t_prev_local,
-                            ).detach()
+                        ).detach()
                         x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
+                        x = self._apply_observed_state_constraint(x, observed_full_state_norm, observed_state_mask)
                         continue
 
                     x0_phys = self.denormalize_state(x0)
@@ -910,6 +978,8 @@ class TrajectoryDPFSampling:
                         x0_smoothed = gaussian_filter1d(x0_np, sigma=smooth_sigma, axis=1)
                         x0_phys = torch.tensor(x0_smoothed, dtype=x0_phys.dtype, device=x0_phys.device)
                     x0 = self.normalize_state(x0_phys).detach()
+                    x0 = self._apply_observed_prefix_constraint(x0, observed_prefix_state_norm, prefix_len)
+                    x0 = self._apply_observed_state_constraint(x0, observed_full_state_norm, observed_state_mask)
                 elif target_xy is not None and target_guidance_alpha > 0:
                     x0_phys = self.denormalize_state(x0)
                     x0_phys = self._run_one_step_target_guidance(
@@ -923,13 +993,17 @@ class TrajectoryDPFSampling:
                         use_time_weights=bool(target_guidance_use_time_weights),
                     )
                     x0 = self.normalize_state(x0_phys).detach()
+                    x0 = self._apply_observed_prefix_constraint(x0, observed_prefix_state_norm, prefix_len)
+                    x0 = self._apply_observed_state_constraint(x0, observed_full_state_norm, observed_state_mask)
 
                 eps_coef = torch.sqrt(1.0 - a_bar_prev)
                 x = torch.sqrt(a_bar_prev) * x0 + eps_coef * eps
                 x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
+                x = self._apply_observed_state_constraint(x, observed_full_state_norm, observed_state_mask)
 
         # Denormalize state
         x = self._apply_observed_prefix_constraint(x, observed_prefix_state_norm, prefix_len)
+        x = self._apply_observed_state_constraint(x, observed_full_state_norm, observed_state_mask)
         state = self.denormalize_state(x)
         if self.unconditional_tau_in_state:
             torque_tokens = state[:, :, self.qpos_dim + self.mom_dim:self.qpos_dim + self.mom_dim + self.torque_dim]
