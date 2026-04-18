@@ -34,6 +34,10 @@ DEFAULT_REWARD_CONFIG = {
 DEFAULT_BUDGETS = (256, 512, 1000)
 
 
+def fingertip_xy(qpos_raw: np.ndarray) -> np.ndarray:
+    return fingertip_xy_from_qpos_raw(np.asarray(qpos_raw, dtype=np.float64)[None, :])[0]
+
+
 def aggregate_metric(rows: list[dict], key: str) -> dict[str, float]:
     values = [row[key] for row in rows if row.get(key) is not None]
     if not values:
@@ -66,7 +70,7 @@ def make_observation(
     mom: np.ndarray,
     goal_xy: np.ndarray,
 ) -> np.ndarray:
-    ee_xy = fingertip_xy_from_qpos_raw(np.asarray(qpos_raw, dtype=np.float64)[None, :])[0]
+    ee_xy = fingertip_xy(qpos_raw)
     delta_xy = goal_xy - ee_xy
     return np.concatenate(
         [
@@ -78,6 +82,64 @@ def make_observation(
         ],
         axis=0,
     )
+
+
+def make_goal_conditioned_observation(
+    qpos_raw: np.ndarray,
+    mom: np.ndarray,
+    goal_xy: np.ndarray,
+) -> dict[str, np.ndarray]:
+    ee_xy = fingertip_xy(qpos_raw)
+    return {
+        "observation": np.concatenate(
+            [
+                np.asarray(qpos_raw, dtype=np.float32),
+                np.asarray(mom, dtype=np.float32),
+                ee_xy.astype(np.float32, copy=False),
+            ],
+            axis=0,
+        ),
+        "achieved_goal": ee_xy.astype(np.float32, copy=False),
+        "desired_goal": np.asarray(goal_xy, dtype=np.float32),
+    }
+
+
+def make_policy_observation(
+    qpos_raw: np.ndarray,
+    mom: np.ndarray,
+    goal_xy: np.ndarray,
+    *,
+    goal_conditioned: bool,
+) -> np.ndarray | dict[str, np.ndarray]:
+    if goal_conditioned:
+        return make_goal_conditioned_observation(qpos_raw, mom, goal_xy)
+    return make_observation(qpos_raw, mom, goal_xy)
+
+
+def transition_reward(
+    *,
+    previous_achieved_goal: np.ndarray,
+    achieved_goal: np.ndarray,
+    desired_goal: np.ndarray,
+    action_l2_mean: np.ndarray,
+    reward_config: dict[str, float],
+    goal_tolerance: float,
+) -> np.ndarray:
+    previous_achieved_goal = np.asarray(previous_achieved_goal, dtype=np.float64)
+    achieved_goal = np.asarray(achieved_goal, dtype=np.float64)
+    desired_goal = np.asarray(desired_goal, dtype=np.float64)
+    action_l2_mean = np.asarray(action_l2_mean, dtype=np.float64)
+
+    previous_distance = np.linalg.norm(previous_achieved_goal - desired_goal, axis=-1)
+    next_distance = np.linalg.norm(achieved_goal - desired_goal, axis=-1)
+    improvement = previous_distance - next_distance
+    reward = (
+        float(reward_config["progress_scale"]) * improvement
+        - float(reward_config["distance_scale"]) * next_distance
+        - float(reward_config["action_l2_weight"]) * action_l2_mean
+    )
+    reward = reward + float(reward_config["success_bonus"]) * (next_distance <= float(goal_tolerance))
+    return np.asarray(reward, dtype=np.float64)
 
 
 def list_traj_indices(h5_file: h5py.File) -> list[int]:
@@ -266,6 +328,7 @@ class ReacherGoalEnv(gym.Env):
         random_future_target_min_initial_distance: float = 0.1,
         cross_traj_sampling_max_tries: int = 128,
         reward_config: dict[str, float] | None = None,
+        goal_conditioned: bool = False,
         seed: int = 0,
     ) -> None:
         super().__init__()
@@ -277,6 +340,7 @@ class ReacherGoalEnv(gym.Env):
         self.stall_patience_steps = int(stall_patience_steps)
         self.random_future_target_min_initial_distance = float(random_future_target_min_initial_distance)
         self.cross_traj_sampling_max_tries = int(cross_traj_sampling_max_tries)
+        self.goal_conditioned = bool(goal_conditioned)
         self.reward_config = dict(DEFAULT_REWARD_CONFIG)
         if reward_config:
             self.reward_config.update({key: float(value) for key, value in reward_config.items()})
@@ -295,9 +359,30 @@ class ReacherGoalEnv(gym.Env):
         self.stepper = ReacherRolloutStepper(self.model, dt=self.sim_dt, data_dt=self.data_dt)
         self.coordinate_dim = int(self.model.nu)
 
-        obs_high = np.full((10,), np.inf, dtype=np.float32)
         act_high = np.full((self.coordinate_dim,), self.torque_scale, dtype=np.float32)
-        self.observation_space = spaces.Box(low=-obs_high, high=obs_high, dtype=np.float32)
+        if self.goal_conditioned:
+            self.observation_space = spaces.Dict(
+                {
+                    "observation": spaces.Box(
+                        low=-np.full((6,), np.inf, dtype=np.float32),
+                        high=np.full((6,), np.inf, dtype=np.float32),
+                        dtype=np.float32,
+                    ),
+                    "achieved_goal": spaces.Box(
+                        low=-np.full((2,), np.inf, dtype=np.float32),
+                        high=np.full((2,), np.inf, dtype=np.float32),
+                        dtype=np.float32,
+                    ),
+                    "desired_goal": spaces.Box(
+                        low=-np.full((2,), np.inf, dtype=np.float32),
+                        high=np.full((2,), np.inf, dtype=np.float32),
+                        dtype=np.float32,
+                    ),
+                }
+            )
+        else:
+            obs_high = np.full((10,), np.inf, dtype=np.float32)
+            self.observation_space = spaces.Box(low=-obs_high, high=obs_high, dtype=np.float32)
         self.action_space = spaces.Box(low=-act_high, high=act_high, dtype=np.float32)
 
         self.current_task: dict | None = None
@@ -337,7 +422,12 @@ class ReacherGoalEnv(gym.Env):
         }
 
     def _build_obs(self) -> np.ndarray:
-        return make_observation(self.qpos_raw, self.mom, self.goal_xy)
+        return make_policy_observation(
+            self.qpos_raw,
+            self.mom,
+            self.goal_xy,
+            goal_conditioned=self.goal_conditioned,
+        )
 
     def reset(self, *, seed: int | None = None, options: dict | None = None) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
@@ -362,19 +452,24 @@ class ReacherGoalEnv(gym.Env):
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         action_np = np.asarray(action, dtype=np.float64)
         action_np = np.clip(action_np, -self.torque_scale, self.torque_scale)
+        previous_achieved_goal = fingertip_xy(self.qpos_raw)
         next_qpos_raw, next_mom = self.stepper.step(
             qpos_raw=self.qpos_raw,
             mom=self.mom,
             torque=action_np,
         )
-        next_goal_distance = float(
-            np.linalg.norm(fingertip_xy_from_qpos_raw(next_qpos_raw[None, :])[0] - self.goal_xy)
-        )
-        improvement = float(self.prev_goal_distance - next_goal_distance)
-        reward = (
-            float(self.reward_config["progress_scale"]) * improvement
-            - float(self.reward_config["distance_scale"]) * next_goal_distance
-            - float(self.reward_config["action_l2_weight"]) * float(np.mean(action_np**2))
+        next_achieved_goal = fingertip_xy(next_qpos_raw)
+        next_goal_distance = float(np.linalg.norm(next_achieved_goal - self.goal_xy))
+        action_l2_mean = float(np.mean(action_np**2))
+        reward = float(
+            transition_reward(
+                previous_achieved_goal=previous_achieved_goal,
+                achieved_goal=next_achieved_goal,
+                desired_goal=self.goal_xy,
+                action_l2_mean=np.asarray(action_l2_mean, dtype=np.float64),
+                reward_config=self.reward_config,
+                goal_tolerance=self.goal_tolerance,
+            )
         )
 
         self.qpos_raw = next_qpos_raw
@@ -382,8 +477,6 @@ class ReacherGoalEnv(gym.Env):
         self.step_count += 1
 
         reached_goal = bool(next_goal_distance <= self.goal_tolerance)
-        if reached_goal:
-            reward += float(self.reward_config["success_bonus"])
 
         if next_goal_distance + 1e-12 < self.best_goal_distance_so_far:
             self.best_goal_distance_so_far = float(next_goal_distance)
@@ -408,11 +501,60 @@ class ReacherGoalEnv(gym.Env):
                     (not reached_goal)
                     and self.stall_steps_since_decrease >= int(self.stall_patience_steps)
                 ),
+                "previous_achieved_goal": previous_achieved_goal.astype(np.float32, copy=False),
+                "action_l2_mean": float(action_l2_mean),
                 "action": action_np.astype(np.float32, copy=False),
                 "step_count": int(self.step_count),
             }
         )
         return self._build_obs(), float(reward), terminated, truncated, info
+
+    def compute_reward(
+        self,
+        achieved_goal: np.ndarray,
+        desired_goal: np.ndarray,
+        info: dict | list[dict] | tuple[dict, ...] | None,
+    ) -> np.ndarray | float:
+        achieved_goal_np = np.asarray(achieved_goal, dtype=np.float64)
+        desired_goal_np = np.asarray(desired_goal, dtype=np.float64)
+        squeeze = achieved_goal_np.ndim == 1
+        if squeeze:
+            achieved_goal_np = achieved_goal_np[None, :]
+            desired_goal_np = desired_goal_np[None, :]
+
+        if isinstance(info, dict) or info is None:
+            info_list = [info or {}]
+        else:
+            info_list = list(info)
+
+        if len(info_list) == 1 and len(achieved_goal_np) > 1:
+            info_list = info_list * len(achieved_goal_np)
+        if len(info_list) != len(achieved_goal_np):
+            raise ValueError(
+                f"compute_reward expected {len(achieved_goal_np)} info dicts, got {len(info_list)}."
+            )
+
+        previous_achieved_goal = np.zeros_like(achieved_goal_np, dtype=np.float64)
+        action_l2_mean = np.zeros((len(achieved_goal_np),), dtype=np.float64)
+        for index, info_dict in enumerate(info_list):
+            prev_goal = info_dict.get("previous_achieved_goal")
+            if prev_goal is None:
+                previous_achieved_goal[index] = achieved_goal_np[index]
+            else:
+                previous_achieved_goal[index] = np.asarray(prev_goal, dtype=np.float64)
+            action_l2_mean[index] = float(info_dict.get("action_l2_mean", 0.0))
+
+        rewards = transition_reward(
+            previous_achieved_goal=previous_achieved_goal,
+            achieved_goal=achieved_goal_np,
+            desired_goal=desired_goal_np,
+            action_l2_mean=action_l2_mean,
+            reward_config=self.reward_config,
+            goal_tolerance=self.goal_tolerance,
+        )
+        if squeeze:
+            return float(rewards[0])
+        return rewards.astype(np.float32, copy=False)
 
 
 def evaluate_policy_on_tasks(
@@ -441,6 +583,7 @@ def evaluate_policy_on_tasks(
     summary_name: str = "reacher_rl_policy_eval_summary.json",
     progress_summary_name: str = "reacher_rl_policy_eval_progress.json",
     extra_metadata: dict | None = None,
+    goal_conditioned_policy: bool = False,
 ) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -486,7 +629,12 @@ def evaluate_policy_on_tasks(
                 if stall_steps_since_decrease >= int(stall_patience_steps):
                     stopped_due_to_stall = True
                     break
-                obs = make_observation(qpos_prefix_raw[-1], mom_prefix[-1], goal_xy)
+                obs = make_policy_observation(
+                    qpos_prefix_raw[-1],
+                    mom_prefix[-1],
+                    goal_xy,
+                    goal_conditioned=bool(goal_conditioned_policy),
+                )
                 action = np.asarray(policy_fn(obs, deterministic_policy), dtype=np.float64).reshape(-1)
                 action = np.clip(action, -float(action_scale), float(action_scale))
                 next_qpos_raw, next_mom = stepper.step(

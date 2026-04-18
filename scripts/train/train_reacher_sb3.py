@@ -80,6 +80,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gif_max_frames", type=int, default=200)
     parser.add_argument("--budget_steps", type=str, default="256,512,1000")
     parser.add_argument("--td3_action_noise_sigma", type=float, default=0.1)
+    parser.add_argument("--use_her", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--her_n_sampled_goal", type=int, default=4)
+    parser.add_argument("--her_goal_selection_strategy", type=str, default="future")
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--seed", type=int, default=0)
     return parser.parse_args()
@@ -120,6 +123,7 @@ def make_env_fn(
             random_future_target_min_initial_distance=float(args.random_future_target_min_initial_distance),
             cross_traj_sampling_max_tries=int(args.cross_traj_sampling_max_tries),
             reward_config=reward_config,
+            goal_conditioned=bool(args.use_her),
             seed=int(args.seed) + int(rank),
         )
 
@@ -138,7 +142,7 @@ def main() -> None:
     args = parse_args()
 
     try:
-        from stable_baselines3 import SAC, TD3
+        from stable_baselines3 import HerReplayBuffer, SAC, TD3
         from stable_baselines3.common.callbacks import BaseCallback
         from stable_baselines3.common.noise import NormalActionNoise
         from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
@@ -160,8 +164,21 @@ def main() -> None:
     np.random.seed(int(args.seed))
     torch.manual_seed(int(args.seed))
 
+    effective_learning_starts = int(args.learning_starts)
+    if bool(args.use_her):
+        effective_learning_starts = max(
+            effective_learning_starts,
+            int(args.train_max_episode_steps) * max(1, int(args.num_envs)) + 1,
+        )
+        if effective_learning_starts != int(args.learning_starts):
+            print(
+                f"[SB3] bumped learning_starts from {int(args.learning_starts)} "
+                f"to {effective_learning_starts} for HER."
+            )
+
     config_payload = dict(vars(args))
     config_payload["reward_config"] = reward_config
+    config_payload["effective_learning_starts"] = int(effective_learning_starts)
     (output_dir / "training_config.json").write_text(json.dumps(config_payload, indent=2), encoding="utf-8")
 
     num_envs = max(1, int(args.num_envs))
@@ -182,11 +199,11 @@ def main() -> None:
     algorithm_name = str(args.algorithm).lower()
     algo_cls = SAC if algorithm_name == "sac" else TD3
     model_kwargs = {
-        "policy": "MlpPolicy",
+        "policy": "MultiInputPolicy" if bool(args.use_her) else "MlpPolicy",
         "env": vec_env,
         "learning_rate": float(args.learning_rate),
         "buffer_size": int(args.buffer_size),
-        "learning_starts": int(args.learning_starts),
+        "learning_starts": int(effective_learning_starts),
         "batch_size": int(args.batch_size),
         "tau": float(args.tau),
         "gamma": float(args.gamma),
@@ -197,6 +214,13 @@ def main() -> None:
         "seed": int(args.seed),
         "device": args.device,
     }
+    if bool(args.use_her):
+        model_kwargs["replay_buffer_class"] = HerReplayBuffer
+        model_kwargs["replay_buffer_kwargs"] = {
+            "n_sampled_goal": int(args.her_n_sampled_goal),
+            "goal_selection_strategy": str(args.her_goal_selection_strategy),
+            "copy_info_dict": True,
+        }
     if algorithm_name == "td3":
         noise_sigma = float(args.td3_action_noise_sigma) * float(args.torque_scale)
         action_noise = NormalActionNoise(
@@ -243,10 +267,12 @@ def main() -> None:
                 cross_traj_sampling_max_tries=int(args.cross_traj_sampling_max_tries),
                 checkpoint_path=checkpoint_path,
                 train_h5_path=args.train_h5_path,
+                goal_conditioned_policy=bool(args.use_her),
                 extra_metadata={
                     "training_step": int(step),
                     "wall_clock_seconds": float(time.time() - train_start),
                     "algorithm": algorithm_name,
+                    "use_her": bool(args.use_her),
                 },
             )
 
@@ -284,6 +310,8 @@ def main() -> None:
     print(f"[SB3] train_h5={args.train_h5_path}")
     print(f"[SB3] eval_h5={args.eval_h5_path}")
     print(f"[SB3] num_envs={num_envs}")
+    print(f"[SB3] use_her={bool(args.use_her)}")
+    print(f"[SB3] learning_starts={effective_learning_starts}")
 
     model.learn(total_timesteps=int(args.total_timesteps), callback=callback, progress_bar=False)
     latest_path = checkpoints_dir / "latest.zip"

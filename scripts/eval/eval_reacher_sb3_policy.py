@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import sys
 
+from gymnasium import spaces
+
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(project_root))
@@ -119,6 +121,7 @@ def main() -> None:
         cross_traj_sampling_max_tries=int(args.cross_traj_sampling_max_tries),
         checkpoint_path=args.checkpoint_path,
         train_h5_path=(args.train_h5_path or None),
+        goal_conditioned_policy=isinstance(model.observation_space, spaces.Dict),
         extra_metadata=metadata,
     )
     print(
