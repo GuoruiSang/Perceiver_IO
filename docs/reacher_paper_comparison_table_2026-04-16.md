@@ -11,10 +11,19 @@ This is a single table of all finished results on the shared 10-task benchmark:
 
 All step counts below are normalized executed control steps. Runtime is test-time runtime for the evaluation itself: RL uses fixed-10-task evaluation wall-clock, while MPC/shooting methods use serial online-control runtime.
 
+For the multi-seed RL rows:
+
+- `3-seed best` = mean over each seed's own best checkpoint
+- `3-seed final` = mean over the `300k` final checkpoint from each seed
+
 | Family | Method | Number of Candidates | Guidance / Setting | Success Rate | Mean Best Goal Dist | Mean Final Goal Dist | Mean Steps To Best | Mean Steps To Final | Test-Time Runtime |
 |---|---|---:|---|---:|---:|---:|---:|---:|---:|
 | `RL` | `SAC` | `-` | best checkpoint | `0.700` | `0.0563 m` | `0.0646 m` | `1921.2` | `2071.2` | `13.4 s` |
 | `RL` | `TD3` | `-` | best checkpoint | `1.000` | `0.0084 m` | `0.0084 m` | `2112.0` | `2112.0` | `10.2 s` |
+| `RL` | `TD3` | `-` | 3-seed best checkpoint mean | `1.000` | `0.0078 m` | `0.0078 m` | `1935.1` | `1935.1` | `8.9 s` |
+| `RL` | `TD3+HER` | `-` | 3-seed best checkpoint mean | `1.000` | `0.0071 m` | `0.0071 m` | `1523.1` | `1523.1` | `8.7 s` |
+| `RL` | `TD3` | `-` | 3-seed final checkpoint mean | `0.667` | `0.0515 m` | `0.0722 m` | `1537.6` | `1704.2` | `7.8 s` |
+| `RL` | `TD3+HER` | `-` | 3-seed final checkpoint mean | `0.067` | `0.1270 m` | `0.1519 m` | `1481.4` | `1921.5` | `10.8 s` |
 | `DPF` | unguided | `1` | predicted suffix | `0.000` | `0.0732 m` | `0.1400 m` | `2469.0` | `3193.5` | `138.4 min` |
 | `DPF` | unguided | `8` | predicted suffix | `0.300` | `0.0274 m` | `0.0984 m` | `1305.5` | `1748.9` | `68.0 min` |
 | `DPF` | unguided | `16` | predicted suffix | `0.800` | `0.0115 m` | `0.0326 m` | `1387.2` | `1487.2` | `68.5 min` |
@@ -49,6 +58,8 @@ All step counts below are normalized executed control steps. Runtime is test-tim
 
 - `TD3` is the strongest finished learned controller overall. It reaches `1.0` success with `0.0084 m` mean best/final goal distance, while also having by far the cheapest test-time evaluation.
 - `SAC` is much weaker than `TD3` on this benchmark. It improves over the weaker DPF guided rows, but it is clearly behind `TD3` and also behind the strongest unguided/shooting baselines in accuracy.
+- In the 3-seed RL suite, `TD3+HER` slightly improves the best-checkpoint mean over plain `TD3` (`0.0071 m` vs `0.0078 m`), so HER can help peak performance in this goal-conditioned setting.
+- But `TD3+HER` is much less stable over long training. Its 3-seed final mean collapses to `0.067` success, while plain `TD3` keeps `0.667` final success.
 - `DPF unguided` improves substantially with candidate count, but not monotonically. In this finished sweep, `cand128` is best, while `cand32` and `cand64` are weaker than `cand16`, which suggests noticeable stochasticity and online-selection effects.
 - `DPF guided` helps mainly at low candidate count. For `cand1`, target guidance and target+HNN guidance improve over unguided. For `cand8`, guidance lifts success from `0.3` to `0.4`, but the gain is still moderate.
 - Within the finished `cand8` guided rows, `target_l1 + hnn`, `target_linf`, and `target_linf + hnn` all tie on success rate at `0.4`. Among them, `target_l1 + hnn` has the best mean final-goal distance, while `target_linf + hnn` has the best mean best-goal distance by a very small margin.
@@ -71,3 +82,4 @@ All step counts below are normalized executed control steps. Runtime is test-tim
 - `/home/gsang/Projects/hnn_guided_dpf/plots/reacher_unguided_candidate_sweep_sharded_2026-04-15/sweep_progress.md`
 - `/home/gsang/Projects/hnn_guided_dpf/plots/reacher_hnn_iid_random_shooting_sweep_sharded_2026-04-15_fast_2workers/sweep_progress.md`
 - `/home/gsang/Projects/hnn_guided_dpf/plots/reacher_mujoco_iid_random_shooting_sweep_serial_2026-04-15_8cpu/sweep_progress.md`
+- `/home/gsang/Projects/hnn_guided_dpf/checkpoints/reacher/td3_her_multiseed_suite_2026-04-17_v2/suite_summary.md`

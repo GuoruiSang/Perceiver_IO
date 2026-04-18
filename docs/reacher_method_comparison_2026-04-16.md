@@ -37,18 +37,28 @@ These comparisons all target the same fixed 10-task benchmark unless noted other
 
 ## 1. RL Policy Baselines
 
-These use the recommended `best_eval.zip` checkpoints, not the final degraded checkpoints.
+These include both the earlier single-seed recommended checkpoints and the later 3-seed `TD3` / `TD3+HER` suite.
+
+For the 3-seed rows below:
+
+- `best-checkpoint mean` means each seed contributes its own best checkpoint, then the table reports the mean across seeds
+- `final-checkpoint mean` means each seed contributes its `300k` final checkpoint, then the table reports the mean across seeds
 
 | Family | Variant | Candidates | Success Rate | Mean Best Goal Dist | Mean Final Goal Dist | Mean Steps To Best | Mean Steps To Final | Eval Wall-Clock | Mean Task Eval Time | Training Wall-Clock |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | `RL` | `SAC best checkpoint` | `-` | `0.700` | `0.056294 m` | `0.064555 m` | `1921.2` | `2071.2` | `13.403 s` | `1.331 s` | `853.3 s` |
 | `RL` | `TD3 best checkpoint` | `-` | `1.000` | `0.008437 m` | `0.008437 m` | `2112.0` | `2112.0` | `10.211 s` | `0.999 s` | `539.6 s` |
+| `RL` | `TD3 3-seed best-checkpoint mean` | `-` | `1.000` | `0.007830 m` | `0.007830 m` | `1935.1` | `1935.1` | `8.857 s` | `0.866 s` | `601.3 s` |
+| `RL` | `TD3+HER 3-seed best-checkpoint mean` | `-` | `1.000` | `0.007087 m` | `0.007087 m` | `1523.1` | `1523.1` | `8.749 s` | `0.839 s` | `1414.1 s` |
+| `RL` | `TD3 3-seed final-checkpoint mean` | `-` | `0.667` | `0.051454 m` | `0.072210 m` | `1537.6` | `1704.2` | `7.793 s` | `0.760 s` | `601.3 s` |
+| `RL` | `TD3+HER 3-seed final-checkpoint mean` | `-` | `0.067` | `0.126952 m` | `0.151877 m` | `1481.4` | `1921.5` | `10.807 s` | `1.072 s` | `1414.1 s` |
 
 Sources:
 
 - `/home/gsang/Projects/hnn_guided_dpf/checkpoints/reacher/sb3_auto_pipeline_2026-04-15/sac_full/eval_best_checkpoint_2026-04-16/reacher_rl_policy_eval_summary.json`
 - `/home/gsang/Projects/hnn_guided_dpf/checkpoints/reacher/sb3_auto_pipeline_2026-04-15/td3_full/eval_best_checkpoint_2026-04-16/reacher_rl_policy_eval_summary.json`
 - `/home/gsang/Projects/hnn_guided_dpf/docs/reacher_sac_td3_results_2026-04-16.md`
+- `/home/gsang/Projects/hnn_guided_dpf/checkpoints/reacher/td3_her_multiseed_suite_2026-04-17_v2/suite_summary.md`
 
 ## 2. Random-Shooting Baselines
 
@@ -151,7 +161,9 @@ These should stay blank rather than be guessed:
 
 ## 7. Quick Read
 
-- Best finished RL result: `TD3 best checkpoint`, `success_rate=1.0`, `best_goal_mean=0.008437 m`
+- Best finished RL result by single run: `TD3 best checkpoint`, `success_rate=1.0`, `best_goal_mean=0.008437 m`
+- Best finished RL result by 3-seed best-checkpoint mean: `TD3+HER`, `success_rate=1.0`, `best_goal_mean=0.007087 m`
+- Stronger stable RL result by 3-seed final mean: `TD3`, `success_rate=0.667`, `best_goal_mean=0.051454 m`
 - Best finished DPF unguided row: `cand128`, `success_rate=0.9`, `best_goal_mean=0.010246 m`
 - Best finished HNN random-shooting row: `cand128`, `success_rate=1.0`, `best_goal_mean=0.009861 m`
 - Best finished MuJoCo random-shooting row: `cand64`, `success_rate=1.0`, `best_goal_mean=0.009877 m`
