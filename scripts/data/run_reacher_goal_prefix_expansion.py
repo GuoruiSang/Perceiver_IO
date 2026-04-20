@@ -262,6 +262,42 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--goal_condition_mode",
+        type=str,
+        default="disabled",
+        choices=("disabled", "qpos_mom_last", "qpos_last", "qpos_soft_block"),
+        help=(
+            "Endpoint-conditioning mode. 'qpos_mom_last' keeps the legacy last-state qpos+mom pin. "
+            "'qpos_last' pins only the terminal qpos. 'qpos_soft_block' pins the last K qpos states "
+            "to a Gaussian-softened goal block while leaving momentum free."
+        ),
+    )
+    parser.add_argument(
+        "--goal_condition_block_len",
+        type=int,
+        default=1,
+        help=(
+            "Number of terminal qpos states to pin when goal_condition_mode=qpos_soft_block. "
+            "The final state stays exact; earlier terminal states receive Gaussian perturbations."
+        ),
+    )
+    parser.add_argument(
+        "--goal_condition_qpos_noise_std",
+        type=float,
+        default=0.0,
+        help=(
+            "Base Gaussian std in raw qpos space for terminal soft-block conditioning. "
+            "Noise decays toward zero at the final exact goal state."
+        ),
+    )
+    parser.add_argument(
+        "--goal_condition_noise_decay",
+        type=str,
+        default="linear",
+        choices=("constant", "linear"),
+        help="How terminal qpos soft-block noise decays from earlier states toward the final goal state.",
+    )
+    parser.add_argument(
         "--max_prefix_len",
         "--max_rollout_steps",
         dest="max_rollout_steps",
@@ -460,6 +496,13 @@ def effective_recent_prefix_len(prefix_len: int, recent_prefix_cap: int) -> int:
     return int(min(int(prefix_len), int(recent_prefix_cap)))
 
 
+def resolve_goal_condition_mode(args: argparse.Namespace) -> str:
+    mode = str(getattr(args, "goal_condition_mode", "disabled"))
+    if mode == "disabled" and bool(getattr(args, "condition_suffix_last_state_on_goal", False)):
+        return "qpos_mom_last"
+    return mode
+
+
 def build_observed_windows(
     *,
     qpos_prefix_raw: list[np.ndarray],
@@ -471,6 +514,11 @@ def build_observed_windows(
     model: TrajectoryDPF,
     device: torch.device,
     condition_suffix_last_state_on_goal: bool = False,
+    goal_condition_mode: str = "disabled",
+    goal_condition_block_len: int = 1,
+    goal_condition_qpos_noise_std: float = 0.0,
+    goal_condition_noise_decay: str = "linear",
+    goal_condition_seed: int | None = None,
     target_qpos_raw: np.ndarray | None = None,
     target_mom: np.ndarray | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -491,19 +539,53 @@ def build_observed_windows(
         tau_window = np.asarray(torque_prefix[crop_start : crop_start + conditioning_prefix_len - 1], dtype=np.float32)
         observed_tau[0, : conditioning_prefix_len - 1] = torch.from_numpy(tau_window).to(device=device)
 
-    if condition_suffix_last_state_on_goal:
-        if target_qpos_raw is None or target_mom is None:
-            raise ValueError(
-                "target_qpos_raw and target_mom are required when condition_suffix_last_state_on_goal is enabled."
-            )
-        target_qpos_model = encode_qpos_array(
-            np.asarray(target_qpos_raw, dtype=np.float32)[None, :],
+    resolved_goal_condition_mode = str(goal_condition_mode)
+    if resolved_goal_condition_mode == "disabled" and condition_suffix_last_state_on_goal:
+        resolved_goal_condition_mode = "qpos_mom_last"
+
+    if resolved_goal_condition_mode != "disabled":
+        if target_qpos_raw is None:
+            raise ValueError("target_qpos_raw is required when endpoint goal conditioning is enabled.")
+
+        target_qpos_raw = np.asarray(target_qpos_raw, dtype=np.float32)
+        if resolved_goal_condition_mode == "qpos_mom_last" and target_mom is None:
+            raise ValueError("target_mom is required when goal_condition_mode=qpos_mom_last.")
+
+        block_len = 1
+        if resolved_goal_condition_mode == "qpos_soft_block":
+            max_block_len = max(1, sample_horizon - conditioning_prefix_len)
+            block_len = int(max(1, min(int(goal_condition_block_len), max_block_len)))
+        block_start = sample_horizon - block_len
+
+        qpos_block_raw = np.repeat(target_qpos_raw[None, :], block_len, axis=0)
+        if resolved_goal_condition_mode == "qpos_soft_block" and block_len > 1:
+            noise_std = float(max(0.0, goal_condition_qpos_noise_std))
+            if noise_std > 0.0:
+                rng = np.random.default_rng(goal_condition_seed)
+                for offset in range(block_len - 1):
+                    if str(goal_condition_noise_decay) == "constant":
+                        local_std = noise_std
+                    else:
+                        local_std = noise_std * float(block_len - 1 - offset) / float(block_len - 1)
+                    if local_std <= 0.0:
+                        continue
+                    qpos_block_raw[offset] = qpos_block_raw[offset] + rng.normal(
+                        loc=0.0,
+                        scale=local_std,
+                        size=target_qpos_raw.shape,
+                    ).astype(np.float32, copy=False)
+
+        qpos_block_model = encode_qpos_array(
+            np.asarray(qpos_block_raw, dtype=np.float32),
             model.qpos_representation,
-        )[0].astype(np.float32, copy=False)
-        target_mom = np.asarray(target_mom, dtype=np.float32)
-        observed_qpos[0, sample_horizon - 1] = torch.from_numpy(target_qpos_model).to(device=device)
-        observed_mom[0, sample_horizon - 1] = torch.from_numpy(target_mom).to(device=device)
-        observed_state_mask[0, sample_horizon - 1, : model.qpos_dim + model.mom_dim] = True
+        ).astype(np.float32, copy=False)
+        observed_qpos[0, block_start:] = torch.from_numpy(qpos_block_model).to(device=device)
+        observed_state_mask[0, block_start:, : model.qpos_dim] = True
+
+        if resolved_goal_condition_mode == "qpos_mom_last":
+            target_mom = np.asarray(target_mom, dtype=np.float32)
+            observed_mom[0, sample_horizon - 1] = torch.from_numpy(target_mom).to(device=device)
+            observed_state_mask[0, sample_horizon - 1, model.qpos_dim : model.qpos_dim + model.mom_dim] = True
 
     return observed_qpos, observed_mom, observed_tau, observed_state_mask
 
@@ -730,6 +812,8 @@ def build_summary_payload(
     compact_rows_only: bool,
 ) -> dict:
     payload_rows = [compact_summary_row(row) if compact_rows_only else row for row in rows]
+    goal_condition_mode = resolve_goal_condition_mode(args)
+    use_endpoint_inpainting = goal_condition_mode != "disabled"
     return {
         "checkpoint_path": args.checkpoint_path,
         "h5_path": args.h5_path,
@@ -743,9 +827,13 @@ def build_summary_payload(
         "is_complete": bool(is_complete),
         "num_candidates": int(args.num_candidates),
         "condition_suffix_last_state_on_goal": bool(args.condition_suffix_last_state_on_goal),
+        "goal_condition_mode": goal_condition_mode,
+        "goal_condition_block_len": int(args.goal_condition_block_len),
+        "goal_condition_qpos_noise_std": float(args.goal_condition_qpos_noise_std),
+        "goal_condition_noise_decay": str(args.goal_condition_noise_decay),
         "candidate_scoring": str(args.candidate_scoring),
         "effective_candidate_scoring": (
-            None if bool(args.condition_suffix_last_state_on_goal) else str(args.candidate_scoring)
+            None if use_endpoint_inpainting else str(args.candidate_scoring)
         ),
         "max_sampling_retries": int(args.max_sampling_retries),
         "retry_improvement_margin": float(args.retry_improvement_margin),
@@ -969,16 +1057,18 @@ def main() -> None:
     print(f"[GoalExpand] output_dir={output_dir}")
     print(f"[GoalExpand] task_mode={args.task_mode}")
     print(f"[GoalExpand] task_ids={task_ids}")
-    if bool(args.condition_suffix_last_state_on_goal):
+    goal_condition_mode = resolve_goal_condition_mode(args)
+    use_endpoint_inpainting = goal_condition_mode != "disabled"
+    if use_endpoint_inpainting:
         if int(args.num_candidates) != 1:
             print(
-                f"[GoalExpand] condition_suffix_last_state_on_goal=True overrides "
+                f"[GoalExpand] endpoint goal conditioning ({goal_condition_mode}) overrides "
                 f"num_candidates {args.num_candidates} -> 1"
             )
             args.num_candidates = 1
         if int(args.max_sampling_retries) != 0:
             print(
-                f"[GoalExpand] condition_suffix_last_state_on_goal=True disables retry scoring; "
+                f"[GoalExpand] endpoint goal conditioning ({goal_condition_mode}) disables retry scoring; "
                 f"overriding max_sampling_retries {args.max_sampling_retries} -> 0"
             )
             args.max_sampling_retries = 0
@@ -1056,7 +1146,6 @@ def main() -> None:
                 stopped_due_to_stall = False
                 selection_trace: list[dict] = []
                 reached_goal = rollout_goal_distances[-1] <= float(args.goal_tolerance)
-                use_endpoint_inpainting = bool(args.condition_suffix_last_state_on_goal)
                 while not reached_goal:
                     if (not use_unbounded_reset_rollout) and len(qpos_prefix_raw) >= task_rollout_limit:
                         break
@@ -1095,6 +1184,16 @@ def main() -> None:
                         model=model,
                         device=device,
                         condition_suffix_last_state_on_goal=bool(args.condition_suffix_last_state_on_goal),
+                        goal_condition_mode=goal_condition_mode,
+                        goal_condition_block_len=int(args.goal_condition_block_len),
+                        goal_condition_qpos_noise_std=float(args.goal_condition_qpos_noise_std),
+                        goal_condition_noise_decay=str(args.goal_condition_noise_decay),
+                        goal_condition_seed=(
+                            int(args.seed) * 1000003
+                            + int(task["task_id"]) * 10007
+                            + prefix_len * 101
+                            + conditioning_prefix_len
+                        ),
                         target_qpos_raw=target_qpos_raw,
                         target_mom=target_mom,
                     )
@@ -1392,6 +1491,11 @@ def main() -> None:
                     "target_guidance_norm": str(args.target_guidance_norm),
                     "target_guidance_use_time_weights": bool(args.target_guidance_use_time_weights),
                     "num_candidates": int(args.num_candidates),
+                    "condition_suffix_last_state_on_goal": bool(args.condition_suffix_last_state_on_goal),
+                    "goal_condition_mode": goal_condition_mode,
+                    "goal_condition_block_len": int(args.goal_condition_block_len),
+                    "goal_condition_qpos_noise_std": float(args.goal_condition_qpos_noise_std),
+                    "goal_condition_noise_decay": str(args.goal_condition_noise_decay),
                     "candidate_scoring": str(args.candidate_scoring),
                     "num_diffusion_steps": int(args.num_diffusion_steps),
                     "lookahead_steps": int(args.lookahead_steps),
